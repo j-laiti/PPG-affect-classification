@@ -4,5 +4,4 @@ This repository includes the code to process PPG signals using a lightweight pip
 This includes the following sections:
 1. A processing pipeline which can be applied to PPG datasets such as the open-source WESAD dataset or custom datasets.
 2. A machine learning classification process that can be used to train classification models for PPG data containing affect state labels.
-3. Code example of an analysis of the classification results based on demographic biases and inference time.
-4. An explainability analysis of the Shapley values from the classification models.
+3. An analysis of the classification results including comuptational time, demographic biases, and explainability analysis using Shapley values.
