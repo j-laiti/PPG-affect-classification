@@ -3,7 +3,7 @@
 # Preprocessing method based on this paper:
 # S. Heo, S. Kwon and J. Lee, "Stress Detection With Single PPG Sensor by Orchestrating Multiple Denoising and Peak-Detecting Methods," 
 # in IEEE Access, vol. 9, pp. 47777-47785, 2021, doi: 10.1109/ACCESS.2021.3060441.
-# Adapted July 16th 2024 by Justin Laiti and ChatGPT
+# Adapted March 3rd 2025 by Justin Laiti
 
 import numpy as np
 import scipy.signal as signal
@@ -12,7 +12,7 @@ from scipy.signal import butter, lfilter
 
 #%% Filters ##
 
-# original bandpass 
+# bandpass filter
 
 def bandpass_filter(data, lowcut, highcut, fs, order=2):
     nyquist = 0.5 * fs
@@ -22,13 +22,7 @@ def bandpass_filter(data, lowcut, highcut, fs, order=2):
     y = signal.filtfilt(b, a, data)
     return y
 
-# simplified bandpass
-
-def simple_bandpassfilter(b, a, data):
-    y = signal.filtfilt(b, a, data)
-    return y
-
-# original moving average (no change for simplification)
+# original moving average
 
 def moving_average_filter(data, window_size=3):
     return np.convolve(data, np.ones(window_size)/window_size, mode='same')
@@ -45,20 +39,36 @@ def simple_dynamic_threshold(clean_signal, percentile, window_size = 3):
         for i in range(0, len(clean_signal) - window_size, window_size)
     ]
     threshold = np.percentile(segment_stds, percentile)
-    return segment_stds, threshold
+    return threshold
 
 def simple_noise_elimination(clean_signal, fs, threshold, window_size=3):
     """
     Eliminate noisy segments of the signal based on the calculated threshold.
+
+    Parameters:
+    - clean_signal: The input signal to clean.
+    - fs: Sampling frequency of the signal.
+    - threshold: The standard deviation threshold for noise elimination.
+    - window_size: The size of the window (in seconds) to evaluate noise.
+
+    Returns:
+    - clean_signal_filtered: The cleaned signal with noisy segments removed.
+    - clean_indices: The indices of the clean segments in the original signal.
     """
     clean_indices = []
-    step_size = window_size * fs
-    for i in range(0, len(clean_signal) - step_size, step_size):
+    step_size = int(window_size * fs)  # Convert window size to samples
+
+    for i in range(0, len(clean_signal), step_size):
         segment = clean_signal[i:i + step_size]
         if np.std(segment) < threshold:
-            clean_indices.extend(range(i, i + step_size))
-    # Return the cleaned signal
-    return clean_signal[clean_indices]
+            clean_indices.extend(range(i, i + len(segment)))
+
+    # Convert clean_indices to a NumPy array for indexing
+    clean_indices = np.array(clean_indices)
+
+    # Return the cleaned signal and the indices
+    clean_signal_filtered = clean_signal[clean_indices]
+    return clean_signal_filtered, clean_indices
 
 # simple noise elimination with adaptive threshold and median instead of mean
 

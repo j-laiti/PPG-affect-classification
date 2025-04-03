@@ -8,7 +8,7 @@ import sys
 import os
 # Add the parent directory to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from peak_detection.peak_detection_funcs import threshold_peakdetection, ensemble_peak
+from utils.processing.peak_detection_funcs import threshold_peakdetection, ensemble_peak
 
 def calc_RRI(peaklist, fs):
     if len(peaklist) < 2:
@@ -72,6 +72,7 @@ def calc_td_hrv(RR_list, RR_diff, RR_sqdiff):
 
     return features
 
+# frequency domain features not used in this code
 def calc_fd_hrv(RR_list):
     rr_x = []
     pointer = 0
@@ -108,6 +109,7 @@ def calc_fd_hrv(RR_list):
     features = {'LF': lf, 'HF': hf, 'ULF' : ulf, 'VLF': vlf, 'LFHF': lfhf, 'total_power': total_power, 'lfp': lfp, 'hfp': hfp}
     return features
 
+# non linear features not used in this code
 def calc_nonli_hrv(RR_list):
     diff_RR = np.diff(RR_list)
     sd_heart_period = np.std(diff_RR, ddof=1) ** 2
@@ -127,7 +129,7 @@ def calc_nonli_hrv(RR_list):
     features = {'SD1': SD1, 'SD2': SD2, 'pA': pA, 'pQ': pQ, 'ApEn': ApEn, 'shanEn': shanEn, 'D2': D2}
     return features
 
-def get_ppg_features(ppg_seg, raw_ppg_signal, fs):
+def get_ppg_features(ppg_seg, fs, label, raw_ppg_signal=0, calc_sq=False):
 
     if len(ppg_seg) < fs * 10:  # Ensure at least 10 seconds of data
         print(f"Less than 10 sec of data")
@@ -141,21 +143,24 @@ def get_ppg_features(ppg_seg, raw_ppg_signal, fs):
         return []
     
     td_features = calc_td_hrv(RR_list, RR_diff, RR_sqdiff)
-    fd_features = calc_fd_hrv(RR_list)
+    # fd_features = calc_fd_hrv(RR_list)
     
-    if fd_features == 0:
-        return []
+    # if fd_features == 0:
+    #     return []
     
-    nonli_features = calc_nonli_hrv(RR_list)
+    # nonli_features = calc_nonli_hrv(RR_list)
     
-    total_features = {**td_features, **fd_features, **nonli_features}
+    total_features = {**td_features}
+    total_features["label"] = label
 
-    sqi, snr, snr_freq = calculate_signal_quality(raw_ppg_signal, peak, fs=fs)
+    # Calculate signal quality
+    if calc_sq:
+        sqi, snr, snr_freq = calculate_signal_quality(raw_ppg_signal, peak, fs=fs)
 
-    # Add SQI and SNR to features
-    total_features["sqi"] = sqi
-    total_features["snr"] = snr
-    total_features["snr_freq"] = snr_freq
+        # Add SQI and SNR to features
+        total_features["sqi"] = sqi
+        total_features["snr"] = snr
+        total_features["snr_freq"] = snr_freq
 
     return total_features
 
