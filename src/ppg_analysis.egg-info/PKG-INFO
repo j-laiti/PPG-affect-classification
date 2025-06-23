@@ -5,4 +5,5 @@ Requires-Dist: numpy
 Requires-Dist: scipy
 Requires-Dist: pandas
 Requires-Dist: matplotlib
+Requires-Dist: scikit-learn
 Dynamic: requires-dist

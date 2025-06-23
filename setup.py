@@ -9,6 +9,7 @@ setup(
         "numpy",
         "scipy", 
         "pandas",
-        "matplotlib"
+        "matplotlib",
+        "scikit-learn"
     ]
 )

@@ -2,6 +2,9 @@
 # Figure 3 in the manuscript was created using this code.
 # Justin Laiti June 22 2025
 
+#%%
+print("warm up")
+
 #%% imports
 import pandas as pd
 import matplotlib.pyplot as plt

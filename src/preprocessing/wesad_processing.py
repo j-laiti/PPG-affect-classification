@@ -2,18 +2,47 @@
 # These functions were adapted from the original code by Heo et al. (2021)
 # https://doi.org/10.1109/ACCESS.2021.3060441
 
-# imports
+#%%
+print("warm up")
+
+#%% imports
+# +
 import os
 import pickle
 import math
 import numpy as np
 import pandas as pd
 
-from scipy.interpolate import UnivariateSpline
-from utils.processing.processing_funcs import *
-from utils.processing.feature_extraction import *
+#%%
 
-# WESAD dataset class
+from scipy.interpolate import UnivariateSpline
+from preprocessing_tool.feature_extraction import *
+
+# +
+WINDOW_IN_SECONDS = 120
+
+
+# If you want to apply noise filtering(band-pass filter), noise elimination, and ensemble, include 'bp','time','ens' each in variable NOISE.
+NOISE = ['bp_time']
+main_path='WESAD/'
+
+
+# +
+# E4 (wrist) Sampling Frequencies
+
+fs_dict = {'ACC': 32, 'BVP': 64, 'EDA': 4, 'TEMP': 4, 'label': 700, 'Resp': 700}
+
+label_dict = {'baseline': 0, 'stress': 1, 'amusement': 0}
+int_to_label = {0: 'baseline', 1: 'stress', 0: 'amusement'}
+    
+sec = 12
+N = fs_dict['BVP']*sec  # one block : 10 sec
+overlap = int(np.round(N * 0.02)) # overlapping length
+overlap = overlap if overlap%2 ==0 else overlap+1
+
+
+# -
+
 class SubjectData:
 
     def __init__(self, main_path, subject_number):
@@ -30,17 +59,28 @@ class SubjectData:
         data = self.data['signal']['wrist']
         data.update({'Resp': self.data['signal']['chest']['Resp']})
         return data
-    
-# PPG signal exctraction from WESAD
-def extract_ppg_data(e4_data_dict, labels, ppg_fs, label_fs, norm_type=None):
+
+    def get_chest_data(self):
+        return self.data['signal']['chest']
+
+    def extract_features(self):  # only wrist
+        results = \
+            {
+                key: get_statistics(self.get_wrist_data()[key].flatten(), self.labels, key)
+                for key in self.wrist_keys
+            }
+        return results
+
+
+def extract_ppg_data(e4_data_dict, labels, norm_type=None):
     # Dataframes for each sensor type
     df = pd.DataFrame(e4_data_dict['BVP'], columns=['BVP'])
     label_df = pd.DataFrame(labels, columns=['label'])
     
 
     # Adding indices for combination due to differing sampling frequencies
-    df.index = [(1 / ppg_fs) * i for i in range(len(df))]
-    label_df.index = [(1 / label_fs) * i for i in range(len(label_df))]
+    df.index = [(1 / fs_dict['BVP']) * i for i in range(len(df))]
+    label_df.index = [(1 / fs_dict['label']) * i for i in range(len(label_df))]
 
     # Change indices to datetime
     df.index = pd.to_datetime(df.index, unit='s')
@@ -52,7 +92,7 @@ def extract_ppg_data(e4_data_dict, labels, ppg_fs, label_fs, norm_type=None):
     
     df.reset_index(drop=True, inplace=True)
     
-    if norm_type == 'std': # normalization
+    if norm_type == 'std':  # 시그널 자체를 normalization
         # std norm
         df['BVP'] = (df['BVP'] - df['BVP'].mean()) / df['BVP'].std()
     elif norm_type == 'minmax':
@@ -60,11 +100,11 @@ def extract_ppg_data(e4_data_dict, labels, ppg_fs, label_fs, norm_type=None):
         df = (df - df.min()) / (df.max() - df.min())
 
     # Groupby
-    df = df.dropna(axis=0) # nan
+    df = df.dropna(axis=0) # nan인 행 제거
     
     return df
 
-# Seperate WESAD data by label
+
 def seperate_data_by_label(df):
     
     grouped = df.groupby('label')
@@ -75,23 +115,26 @@ def seperate_data_by_label(df):
     return grouped, baseline, stress, amusement
 
 
-# extract features from PPG signal for each label
-def get_samples(data, label, ppg_fs, window_in_seconds):
+
+def get_samples(data, label, ma_usage):
+    global feat_names
+    global WINDOW_IN_SECONDS
 
     samples = []
 
-    window_len = ppg_fs * window_in_seconds    
-    sliding_window_len = int(ppg_fs * window_in_seconds * 0.25)
+    window_len = fs_dict['BVP'] * WINDOW_IN_SECONDS  # 64*60 , sliding window: 0.25 sec (60*0.25 = 15)   
+    sliding_window_len = int(fs_dict['BVP'] * WINDOW_IN_SECONDS * 0.25)
     
     winNum = 0
+    method = True
     
     i = 0
     while sliding_window_len * i <= len(data) - window_len:
         
-         # 
+         # 한 윈도우에 해당하는 모든 윈도우 담기,
         w = data[sliding_window_len * i: (sliding_window_len * i) + window_len]  
         # Calculate stats for window
-        wstats = get_ppg_features(ppg_seg=w['BVP'].tolist(), fs = ppg_fs, label = label)
+        wstats = get_window_stats_27_features(ppg_seg=w['BVP'].tolist(), window_length = window_len, label=label, ensemble = ENSEMBLE, ma_usage=ma_usage)
         winNum += 1
         
         if wstats == []:
@@ -105,8 +148,8 @@ def get_samples(data, label, ppg_fs, window_in_seconds):
 
     return pd.concat(samples)
 
-# combine all subjects' data into one dataframe and save csv
-def combine_files(subjects, savePath, subject_feature_path, merged_path):
+
+def combine_files(subjects):
     df_list = []
     for s in subjects:
         df = pd.read_csv(f'{savePath}{subject_feature_path}/S{s}.csv', index_col=0)
@@ -126,13 +169,18 @@ def combine_files(subjects, savePath, subject_feature_path, merged_path):
     df.to_csv(savePath + merged_path)
 
     counts = df['label'].value_counts()
-    # print('Number of samples per class:')
-    # for label, number in zip(counts.index, counts.values):
-    #     print(f'{int_to_label[label]}: {number}')
+    print('Number of samples per class:')
+    for label, number in zip(counts.index, counts.values):
+        print(f'{int_to_label[label]}: {number}')
 
 
-# process each PPG signal, extract features, and save to csv for each subject
-def make_patient_data(subject_id, ppg_fs, label_fs, main_path, savePath, subject_feature_path, window_in_seconds):
+def make_patient_data(subject_id, ma_usage):
+    global savePath
+    global WINDOW_IN_SECONDS
+    
+    temp_ths = [1.0,2.0,1.8,1.5] 
+    clean_df = pd.read_csv('clean_signal_by_rate.csv',index_col=0)
+    cycle = 15
     
     # Make subject data object for Sx
     subject = SubjectData(main_path=main_path, subject_number=subject_id)
@@ -143,68 +191,123 @@ def make_patient_data(subject_id, ppg_fs, label_fs, main_path, savePath, subject
     # norm type
     norm_type = 'std'
 
-    df = extract_ppg_data(e4_data_dict, subject.labels, ppg_fs, label_fs, norm_type)
+    df = extract_ppg_data(e4_data_dict, subject.labels, norm_type)
     df_BVP = df.BVP
     df_BVP = df_BVP.tolist()
 
 
-    ## Signal processing ##
+    #signal preprocessing 
+    # fs = 64, order = 3, bp 0.4-2.25
+    # a = [ 1.0, -5.6127402, 13.15702235, -16.48898603, 11.65295471, -4.40331514, 0.69506486]
+    # b = [ 0.00062954, 0.0, -0.00188863, 0.0, 0.00188863, 0.0, -0.00062954]
+    # fs = 64, order = 2, bp 0.4-2.25
+    # b = [ 0.00729268, 0.0, -0.01458535, 0.0, 0.00729268]
+    # a = [ 1.0, -3.72804277, 5.23160732, -3.27698455, 0.77348645]
+    # fs = 64, order = 2, bp 0.4-10
+    b = [ 0.13110644, 0.0, -0.26221288, 0.0, 0.13110644]
+    a = [ 1.0, -2.6907043, 2.6847346, -1.26537341, 0.27221494]
+    # fs = 64, order = 2, bp 0.4-6
+    # b = [ 0.05380208, 0.0, -0.10760416, 0.0, 0.05380208]
+    # a = [ 1.0, -3.20678456, 3.88715659, -2.14041975, 0.46042723]
 
-    # Bandpass filter
-    bp_bvp = bandpass_filter(df_BVP, 0.5, 10, ppg_fs, order=2)
-    df['BVP'] = bp_bvp
-
-    # Moving average filter
-    smoothed_signal = moving_average_filter(bp_bvp, window_size=5)
-    df['BVP'] = smoothed_signal
-
-    # Noise elimination
-    segment_length = ppg_fs * 120  # 120 seconds
-    clean_indices = []
-    clean_signal = []
-    threshold_percentile = 95
-
-    for start in range(0, len(smoothed_signal), segment_length):
-        segment = smoothed_signal[start:start + segment_length]
-
-        # calculate the threshold for this segment
-        std_ths = simple_dynamic_threshold(segment, threshold_percentile, window_size=ppg_fs * 3)
-
-        # eliminate noise from the segment
-        sim_clean_signal, clean_segment_indices = simple_noise_elimination(segment, ppg_fs, std_ths)
-
-        # adjust the indices to match the original signal
-        segment_clean_indices = [i + start for i in clean_segment_indices]
-
-        # append the cleaned segment to the list
-        clean_indices.extend(segment_clean_indices)
-        clean_signal.extend(sim_clean_signal)
-
-    # Filter the DataFrame to match the clean signal
-    df = df.iloc[clean_indices, :]
-
-    # Add the clean signal to the DataFrame
-    df['clean_BVP'] = clean_signal
-
-    # Reset the DataFrame index (optional, if needed for further processing)
-    df = df.reset_index(drop=True)
+    # bp_bvp = simple_bandpassfilter(b, a, df_BVP)
+    bp_bvp = butter_bandpassfilter(df_BVP, 0.5, 10, fs_dict['BVP'], order=2)
     
-    group, baseline, stress, amusement = seperate_data_by_label(df)   
+    if BP:   
+        df['BVP'] = bp_bvp
+        
+    if TIME:
+        smoothed_signal = moving_average_filter(bp_bvp, window_size=5)
+        # bwd = moving_average(bp_bvp[::-1], size=3)
+        # bp_bvp = np.mean(np.vstack((fwd,bwd[::-1])), axis=0)
+        df['BVP'] = smoothed_signal
+
+        segment_stds, std_ths = simple_dynamic_threshold(smoothed_signal, 85, window_size=fs * 3)
+
+        # Print the dynamic threshold and standard deviations
+        print(f"Dynamic Threshold (95th Percentile): {std_ths}")
+        print(f"Segment Standard Deviations: {segment_stds}")
+
+        sim_clean_signal, clean_signal_indices = simple_noise_elimination(smoothed_signal,fs,std_ths)
+        # sim_final_clean_signal = moving_average_filter(sim_clean_signal, window_size=3)
+        
+        df = df.iloc[clean_signal_indices,:]
+        df = df.reset_index(drop=True)
+
+        # df['BVP'] = sim_final_clean_signal
+        
+        plt.figure(figsize=(40,20))
+        plt.plot(df['BVP'][:6000], color = 'b', linewidth=2.5)
     
-    baseline_samples = get_samples(baseline, 0, ppg_fs, window_in_seconds)
-    stress_samples = get_samples(stress, 1, ppg_fs, window_in_seconds)
-    amusement_samples = get_samples(amusement, 0, ppg_fs, window_in_seconds)
+    
+    grouped, baseline, stress, amusement = seperate_data_by_label(df)   
+    
+    
+    baseline_samples = get_samples(baseline, 0, ma_usage)
+    stress_samples = get_samples(stress, 1, ma_usage)
+    amusement_samples = get_samples(amusement, 0, ma_usage)
     
     print("stress: ",len(stress_samples))
     print("non-stress: ",len(amusement_samples)+len(baseline_samples))
     window_len = len(baseline_samples)+len(stress_samples)+len(amusement_samples)
 
     all_samples = pd.concat([baseline_samples, stress_samples, amusement_samples])
-    all_samples = pd.concat([all_samples.drop('label', axis=1), pd.get_dummies(all_samples['label'])], axis=1) # get dummies
+    all_samples = pd.concat([all_samples.drop('label', axis=1), pd.get_dummies(all_samples['label'])], axis=1) # get dummies로 원핫벡터로 라벨값 나타냄
     
     
     all_samples.to_csv(f'{savePath}{subject_feature_path}/S{subject_id}.csv')
 
+    # Does this save any space?
     subject = None
     
     return window_len
+
+# +
+noise = NOISE[0].split('_')[:-1]
+name = ''
+for i, n in enumerate(noise):
+    name += n
+    if i != len(noise)-1:
+        name += '_'
+    
+print(name)
+
+# +
+total_window_len = 0
+BP, FREQ, TIME, ENSEMBLE = False, False, False, False
+# subject_ids = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17]
+subject_ids = [9, 13]
+
+feat_names = None
+savePath = '../data/WESAD'
+
+if not os.path.exists(savePath):
+    os.makedirs(savePath)
+
+
+for n in NOISE:
+    if 'bp' in n.split('_'):
+        BP = True
+    if 'time' in n.split('_'):
+        TIME = True
+    if 'ens' in n.split('_'):
+        ENSEMBLE = True
+
+
+    subject_feature_path = '/subject_sim85bp_features_' + n + str(WINDOW_IN_SECONDS)
+    merged_path = '/data_merged_sim85bp_' + n +'.csv'
+    
+    if not os.path.exists(savePath + subject_feature_path):
+        os.makedirs(savePath + subject_feature_path)
+    
+        
+    for patient in subject_ids:
+        print(f'Processing data for S{patient}...')
+        window_len = make_patient_data(patient, BP)
+        total_window_len += window_len
+
+    combine_files(subject_ids)
+    print('total_Window_len: ',total_window_len)
+    print('Processing complete.', n)
+    total_window_len = 0
+
