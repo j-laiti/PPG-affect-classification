@@ -106,6 +106,11 @@ plt.tight_layout()
 plt.show()
 
 
+#%% comparison of bandpass filter ranges
+
+
+
+
 
 
 

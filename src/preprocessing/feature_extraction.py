@@ -2,13 +2,12 @@
 import numpy as np
 import math
 from scipy.interpolate import UnivariateSpline
-import nolds
-from scipy import stats
 import sys
-import os
-# Add the parent directory to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from utils.processing.peak_detection_funcs import threshold_peakdetection, ensemble_peak
+import types
+# import nolds
+from nolds.measures import sampen, corr_dim
+from scipy import stats
+from preprocessing.peak_detection import threshold_peakdetection
 
 def calc_RRI(peaklist, fs):
     if len(peaklist) < 2:
@@ -110,24 +109,24 @@ def calc_fd_hrv(RR_list):
     return features
 
 # non linear features not used in this code
-def calc_nonli_hrv(RR_list):
-    diff_RR = np.diff(RR_list)
-    sd_heart_period = np.std(diff_RR, ddof=1) ** 2
-    SD1 = np.sqrt(sd_heart_period * 0.5)
-    SD2 = 2 * sd_heart_period - 0.5 * sd_heart_period
-    pA = SD1*SD2
+# def calc_nonli_hrv(RR_list):
+#     diff_RR = np.diff(RR_list)
+#     sd_heart_period = np.std(diff_RR, ddof=1) ** 2
+#     SD1 = np.sqrt(sd_heart_period * 0.5)
+#     SD2 = 2 * sd_heart_period - 0.5 * sd_heart_period
+#     pA = SD1*SD2
     
-    if SD2 != 0:
-        pQ = SD1 / SD2
-    else:
-        pQ = 0
+#     if SD2 != 0:
+#         pQ = SD1 / SD2
+#     else:
+#         pQ = 0
     
-    ApEn = nolds.sampen(RR_list)
-    shanEn = stats.entropy(RR_list)
-    D2 = nolds.corr_dim(RR_list, emb_dim=2)
+#     ApEn = nolds.sampen(RR_list)
+#     shanEn = stats.entropy(RR_list)
+#     D2 = nolds.corr_dim(RR_list, emb_dim=2)
 
-    features = {'SD1': SD1, 'SD2': SD2, 'pA': pA, 'pQ': pQ, 'ApEn': ApEn, 'shanEn': shanEn, 'D2': D2}
-    return features
+#     features = {'SD1': SD1, 'SD2': SD2, 'pA': pA, 'pQ': pQ, 'ApEn': ApEn, 'shanEn': shanEn, 'D2': D2}
+#     return features
 
 def get_ppg_features(ppg_seg, fs, label, raw_ppg_signal=0, calc_sq=False):
 

@@ -23,7 +23,7 @@ from preprocessing.filters import *
 WINDOW_IN_SECONDS = 120
 
 
-# If you want to apply noise filtering(band-pass filter), noise elimination, and ensemble, include 'bp','time','ens' each in variable NOISE.
+# If you want to apply noise filtering(band-pass filter) and noise elimination, include 'bp' and 'time' each in variable NOISE.
 NOISE = ['bp_time']
 main_path='../../data/WESAD/'
 
@@ -60,17 +60,6 @@ class SubjectData:
         data = self.data['signal']['wrist']
         data.update({'Resp': self.data['signal']['chest']['Resp']})
         return data
-
-    def get_chest_data(self):
-        return self.data['signal']['chest']
-
-    def extract_features(self):  # only wrist
-        results = \
-            {
-                key: get_statistics(self.get_wrist_data()[key].flatten(), self.labels, key)
-                for key in self.wrist_keys
-            }
-        return results
 
 
 def extract_ppg_data(e4_data_dict, labels, norm_type=None):
@@ -179,10 +168,6 @@ def make_patient_data(subject_id, ma_usage):
     global savePath
     global WINDOW_IN_SECONDS
     
-    temp_ths = [1.0,2.0,1.8,1.5] 
-    clean_df = pd.read_csv('../../data/WESAD/clean_signal_by_rate.csv',index_col=0)
-    cycle = 15
-    
     # Make subject data object for Sx
     subject = SubjectData(main_path=main_path, subject_number=subject_id)
     
@@ -192,6 +177,7 @@ def make_patient_data(subject_id, ma_usage):
     # norm type
     norm_type = 'std'
 
+    # fetch data and standardize it
     df = extract_ppg_data(e4_data_dict, subject.labels, norm_type)
     df_BVP = df.BVP
     df_BVP = df_BVP.tolist()
@@ -199,7 +185,7 @@ def make_patient_data(subject_id, ma_usage):
 
     #signal preprocessing 
 
-    bp_bvp = bandpass_filter(df_BVP, 0.5, 10, fs_dict['BVP'], order=2)
+    bp_bvp = bandpass_filter(df_BVP, 0.2, 10, fs_dict['BVP'], order=2)
     
     if BP:   
         df['BVP'] = bp_bvp
@@ -262,9 +248,9 @@ print(name)
 
 # +
 total_window_len = 0
-BP, FREQ, TIME, ENSEMBLE = False, False, False, False
+BP, FREQ, TIME = False, False, False
 subject_ids = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17]
-# subject_ids = [2]
+# subject_ids = [7, 8, 9, 10, 11, 13, 14, 15, 16, 17]
 
 feat_names = None
 savePath = '../../data/WESAD'
@@ -278,12 +264,10 @@ for n in NOISE:
         BP = True
     if 'time' in n.split('_'):
         TIME = True
-    if 'ens' in n.split('_'):
-        ENSEMBLE = True
 
 
-    subject_feature_path = '/subject_extracted_features_' + n + str(WINDOW_IN_SECONDS)
-    merged_path = '/data_merged_' + n +'.csv'
+    subject_feature_path = '/subject_bp02_extracted_features_' + n + str(WINDOW_IN_SECONDS)
+    merged_path = '/data_bp8_merged_' + n +'.csv'
     
     if not os.path.exists(savePath + subject_feature_path):
         os.makedirs(savePath + subject_feature_path)
@@ -299,6 +283,11 @@ for n in NOISE:
     print('Processing complete.', n)
     total_window_len = 0
 
-
-
 # %%
+
+# load WESAD features calculated using
+# 0.5-10 Hz bp dataset
+
+# 0.5-8 Hz bp dataset
+
+# 0.2-10 Hz bp dataset
