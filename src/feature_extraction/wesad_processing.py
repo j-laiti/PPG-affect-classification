@@ -282,12 +282,3 @@ for n in NOISE:
     print('total_Window_len: ',total_window_len)
     print('Processing complete.', n)
     total_window_len = 0
-
-# %%
-
-# load WESAD features calculated using
-# 0.5-10 Hz bp dataset
-
-# 0.5-8 Hz bp dataset
-
-# 0.2-10 Hz bp dataset

@@ -63,70 +63,11 @@ def calc_td_hrv(RR_list, RR_diff, RR_sqdiff):
     NN50 = [x for x in RR_diff if x > 50]
     pNN20 = len(NN20) / len(RR_diff) * 100
     pNN50 = len(NN50) / len(RR_diff) * 100
-    bar_y, bar_x = np.histogram(RR_list)
-    TINN = np.max(bar_x) - np.min(bar_x)
 
     features = {'HR_mean': HR_mean, 'HR_std': HR_std, 'meanNN': meanNN, 'SDNN': SDNN, 'medianNN': medianNN,
-                'meanSD': meanSD, 'SDSD': SDSD, 'RMSSD': RMSSD, 'pNN20': pNN20, 'pNN50': pNN50, 'TINN': TINN}
+                'meanSD': meanSD, 'SDSD': SDSD, 'RMSSD': RMSSD, 'pNN20': pNN20, 'pNN50': pNN50}
 
     return features
-
-# frequency domain features not used in this code
-def calc_fd_hrv(RR_list):
-    rr_x = []
-    pointer = 0
-    for x in RR_list:
-        pointer += x
-        rr_x.append(pointer)
-        
-    if len(rr_x) <= 3 or len(RR_list) <= 3:
-        return 0
-    
-    RR_x_new = np.linspace(rr_x[0], rr_x[-1], int(rr_x[-1]))
-    interpolated_func = UnivariateSpline(rr_x, RR_list, k=3)
-    datalen = len(RR_x_new)
-    frq = np.fft.fftfreq(datalen, d=((1/1000.0)))
-    frq = frq[range(int(datalen/2))]
-    Y = np.fft.fft(interpolated_func(RR_x_new))/datalen
-    Y = Y[range(int(datalen/2))]
-    psd = np.power(Y, 2)
-
-    lf = np.trapz(abs(psd[(frq >= 0.04) & (frq <= 0.15)]))
-    hf = np.trapz(abs(psd[(frq > 0.15) & (frq <= 0.5)]))
-    ulf = np.trapz(abs(psd[frq < 0.003]))
-    vlf = np.trapz(abs(psd[(frq >= 0.003) & (frq < 0.04)]))
-    
-    if hf != 0:
-        lfhf = lf/hf
-    else:
-        lfhf = 0
-        
-    total_power = lf + hf + vlf
-    lfp = lf / total_power
-    hfp = hf / total_power
-
-    features = {'LF': lf, 'HF': hf, 'ULF' : ulf, 'VLF': vlf, 'LFHF': lfhf, 'total_power': total_power, 'lfp': lfp, 'hfp': hfp}
-    return features
-
-# non linear features not used in this code
-# def calc_nonli_hrv(RR_list):
-#     diff_RR = np.diff(RR_list)
-#     sd_heart_period = np.std(diff_RR, ddof=1) ** 2
-#     SD1 = np.sqrt(sd_heart_period * 0.5)
-#     SD2 = 2 * sd_heart_period - 0.5 * sd_heart_period
-#     pA = SD1*SD2
-    
-#     if SD2 != 0:
-#         pQ = SD1 / SD2
-#     else:
-#         pQ = 0
-    
-#     ApEn = nolds.sampen(RR_list)
-#     shanEn = stats.entropy(RR_list)
-#     D2 = nolds.corr_dim(RR_list, emb_dim=2)
-
-#     features = {'SD1': SD1, 'SD2': SD2, 'pA': pA, 'pQ': pQ, 'ApEn': ApEn, 'shanEn': shanEn, 'D2': D2}
-#     return features
 
 def get_ppg_features(ppg_seg, fs, label, raw_ppg_signal=0, calc_sq=False):
 
@@ -142,24 +83,16 @@ def get_ppg_features(ppg_seg, fs, label, raw_ppg_signal=0, calc_sq=False):
         return []
     
     td_features = calc_td_hrv(RR_list, RR_diff, RR_sqdiff)
-    # fd_features = calc_fd_hrv(RR_list)
-    
-    # if fd_features == 0:
-    #     return []
-    
-    # nonli_features = calc_nonli_hrv(RR_list)
     
     total_features = {**td_features}
     total_features["label"] = label
 
     # Calculate signal quality
     if calc_sq:
-        sqi, snr, snr_freq = calculate_signal_quality(raw_ppg_signal, peak, fs=fs)
+        sqi = calculate_signal_quality(raw_ppg_signal, peak, fs=fs)
 
-        # Add SQI and SNR to features
+        # Add SQI
         total_features["sqi"] = sqi
-        total_features["snr"] = snr
-        total_features["snr_freq"] = snr_freq
 
     return total_features
 
@@ -195,57 +128,4 @@ def calculate_signal_quality(raw_ppg_signal, peaklist, fs=50):
     # SQI computation
     sqi = max(0, 1 - (0.4 * (1 - min(snr / 100, 1)) + 0.4 * (rr_std_clipped / 1000) + 0.2 * rr_mean_penalty))
 
-    # snr based on frequency
-    # perform a lowpass filter for signal under 20 Hz
-    ppg_signal = lowpass_filter(raw_ppg_signal, 20, 50)
-
-    # perform a highpass filter for signal above 20 Hz
-    noise_signal = highpass_filter(raw_ppg_signal, 20, 50)
-
-    # find the amplitude of each and then make a ratio
-    signal_amplitude = np.sqrt(np.mean(ppg_signal ** 2))  # RMS amplitude
-    noise_amplitude = np.sqrt(np.mean(noise_signal ** 2))  # RMS amplitude
-    snr_freq = 20 * np.log10(signal_amplitude / noise_amplitude)  # Amplitude-based SNR
-
-    return sqi, snr, snr_freq
-
-from scipy.signal import butter, filtfilt
-
-def lowpass_filter(data, cutoff, fs, order=2):
-    """
-    Apply a low-pass Butterworth filter to the signal.
-
-    Parameters:
-    - data: The input signal.
-    - cutoff: The cutoff frequency in Hz.
-    - fs: The sampling frequency of the signal.
-    - order: The order of the filter (default is 4).
-
-    Returns:
-    - Filtered signal.
-    """
-    nyquist = 0.5 * fs  # Nyquist frequency
-    normalized_cutoff = cutoff / nyquist  # Normalize the cutoff frequency
-    b, a = butter(order, normalized_cutoff, btype='low', analog=False)  # Design the filter
-    filtered_data = filtfilt(b, a, data)  # Apply the filter
-    return filtered_data
-
-def highpass_filter(data, cutoff, fs, order=2):
-    """
-    Apply a high-pass Butterworth filter to the signal.
-
-    Parameters:
-    - data: The input signal.
-    - cutoff: The cutoff frequency in Hz.
-    - fs: The sampling frequency of the signal.
-    - order: The order of the filter (default is 4).
-
-    Returns:
-    - Filtered signal.
-    """
-    nyquist = 0.5 * fs  # Nyquist frequency
-    normalized_cutoff = cutoff / nyquist  # Normalize the cutoff frequency
-    b, a = butter(order, normalized_cutoff, btype='high', analog=False)  # Design the filter
-    filtered_data = filtfilt(b, a, data)  # Apply the filter
-    return filtered_data
-
+    return sqi

@@ -1,6 +1,10 @@
 README.md
 setup.py
 src/feature_extraction/__init__.py
+src/feature_extraction/aktives_process_folder.py
+src/feature_extraction/aktives_processing_test.py
+src/feature_extraction/test_loop_with_plots.py
+src/feature_extraction/wesad_processing.py
 src/ppg_analysis.egg-info/PKG-INFO
 src/ppg_analysis.egg-info/SOURCES.txt
 src/ppg_analysis.egg-info/dependency_links.txt
