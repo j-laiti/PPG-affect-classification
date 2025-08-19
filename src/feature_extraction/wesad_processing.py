@@ -183,7 +183,7 @@ def make_patient_data(subject_id, ma_usage):
     df_BVP = df_BVP.tolist()
 
 
-    #signal preprocessing 
+    # Signal preprocessing
 
     bp_bvp = bandpass_filter(df_BVP, 0.2, 10, fs_dict['BVP'], order=2)
     

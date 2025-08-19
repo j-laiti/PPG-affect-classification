@@ -1,4 +1,5 @@
 # LOGO cross validation of the WESAD feature set adapted from Heo et al. 2021
+# applied to the CNN and TD combined feature set
 
 # + Code for Table 5 in paper
 import pandas as pd
@@ -11,7 +12,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.ensemble import AdaBoostClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn import tree
 from sklearn import svm
 from sklearn.preprocessing import StandardScaler
 
@@ -96,20 +96,6 @@ def read_csv(path, feats, testset_num):
 
 # # Machine learning models
 
-# +
-def DT_model(X_train, y_train, X_test, y_test):
-    
-    model = tree.DecisionTreeClassifier(random_state=0)
-    model.fit(X_train,y_train)
-    y_pred = model.predict(X_test)
-    
-    accuracy = accuracy_score(y_test, y_pred)
-    AUC = roc_auc_score(y_test, y_pred)
-    F1 = f1_score(y_test, y_pred)
-
-    
-    return AUC, F1, accuracy
-
 
 def RF_model(X_train, y_train, X_test, y_test):
     
@@ -190,11 +176,10 @@ def GB_model(X_train, y_train, X_test, y_test):
 # +
 
     
-path = '../data/WESAD_feats.csv'
-result_path_all = '../data/WESAD_eval.csv'
-result_path_ci = '../data/WESAD_eval_with_ci.csv'
+path = '../data/WESAD_all_subjects_TD_features.csv'
+result_path_all = '../results/WESAD/WESAD_TD_features_eval.csv'
+result_path_ci = '../results/WESAD/WESAD_TD_features_eval_with_ci.csv'
 
-DT_AUC, DT_F1, DT_ACC = [], [], []
 RF_AUC, RF_F1, RF_ACC = [], [], []
 AB_AUC, AB_F1, AB_ACC = [], [], []
 KN_AUC, KN_F1, KN_ACC = [], [], []
@@ -211,7 +196,6 @@ for sub in subjects:
     X_train = sc.fit_transform(X_train)  
     X_test = sc.transform(X_test)  
 
-    auc_dt, f1_dt, acc_dt = DT_model(X_train, y_train, X_test, y_test)
     auc_rf, f1_rf, acc_rf = RF_model(X_train, y_train, X_test, y_test)
     auc_ab, f1_ab, acc_ab = AB_model(X_train, y_train, X_test, y_test)
     auc_kn, f1_kn, acc_kn = KN_model(X_train, y_train, X_test, y_test)
@@ -219,9 +203,6 @@ for sub in subjects:
     auc_svm, f1_svm, acc_svm = SVM_model(X_train, y_train, X_test, y_test)
     auc_gb, f1_gb, acc_gb = GB_model(X_train, y_train, X_test, y_test)
 
-    DT_AUC.append(auc_dt*100)
-    DT_F1.append(f1_dt*100)
-    DT_ACC.append(acc_dt*100)
     RF_AUC.append(auc_rf*100)
     RF_F1.append(f1_rf*100)
     RF_ACC.append(acc_rf*100)
@@ -245,21 +226,18 @@ with open(result_path_all, 'w', newline='') as file:
     writer = csv.writer(file)
 
     writer.writerow(['subject','S2','S3','S4','S5','S6','S7','S8','S9','S10','S11','S13','S14','S15','S16','S17','total'])
-    writer.writerow(['DT_AUC'] + DT_AUC + [np.mean(DT_AUC)])
     writer.writerow(['RF_AUC'] + RF_AUC + [np.mean(RF_AUC)])
     writer.writerow(['AB_AUC'] + AB_AUC + [np.mean(AB_AUC)])
     writer.writerow(['KN_AUC'] + KN_AUC + [np.mean(KN_AUC)])
     writer.writerow(['LDA_AUC'] + LDA_AUC + [np.mean(LDA_AUC)])
     writer.writerow(['SVM_AUC'] + SVM_AUC + [np.mean(SVM_AUC)])
     writer.writerow(['GB_AUC'] + GB_AUC + [np.mean(GB_AUC)])
-    writer.writerow(['DT_F1'] + DT_F1 + [np.mean(DT_F1)])
     writer.writerow(['RF_F1'] + RF_F1 + [np.mean(RF_F1)])
     writer.writerow(['AB_F1'] + AB_F1 + [np.mean(AB_F1)])
     writer.writerow(['KN_F1'] + KN_F1 + [np.mean(KN_F1)])
     writer.writerow(['LDA_F1'] + LDA_F1 + [np.mean(LDA_F1)])
     writer.writerow(['SVM_F1'] + SVM_F1 + [np.mean(SVM_F1)])
     writer.writerow(['GB_F1'] + GB_F1 + [np.mean(GB_F1)])
-    writer.writerow(['DT_ACC'] + DT_ACC + [np.mean(DT_ACC)])
     writer.writerow(['RF_ACC'] + RF_ACC + [np.mean(RF_ACC)])
     writer.writerow(['AB_ACC'] + AB_ACC + [np.mean(AB_ACC)])
     writer.writerow(['KN_ACC'] + KN_ACC + [np.mean(KN_ACC)])
@@ -275,9 +253,6 @@ with open(result_path_ci, 'w', newline='') as file:
     
     # All results with confidence intervals
     results_data = [
-        ('DT', 'AUC-ROC', DT_AUC),
-        ('DT', 'F1', DT_F1),
-        ('DT', 'Accuracy', DT_ACC),
         ('RF', 'AUC-ROC', RF_AUC),
         ('RF', 'F1', RF_F1),
         ('RF', 'Accuracy', RF_ACC),
