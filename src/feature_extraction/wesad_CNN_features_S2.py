@@ -6,6 +6,8 @@ import sys
 import os
 
 # Add path for preprocessing functions
+# Testing CNN extraction on one participant
+
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from preprocessing.feature_extraction import get_ppg_features
 from preprocessing.filters import bandpass_filter, moving_average_filter
