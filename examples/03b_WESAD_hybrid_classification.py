@@ -4,7 +4,7 @@
 import pandas as pd
 import numpy as np
 import csv
-from scipy import stats  # For confidence intervals
+from scipy import stats
 
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.ensemble import RandomForestClassifier

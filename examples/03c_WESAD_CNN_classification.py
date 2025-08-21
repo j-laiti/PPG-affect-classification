@@ -1,21 +1,5 @@
 # CNN classification of the WESAD dataset based on PPG signals labels stress and non-stress
 
-# imports
-
-# select the raw data from ../data/WESAD_BVP_extracted/ based on data labeled stress (1.0) and non-stress (0.0)
-
-# break into window sizes of 120 for the raw data
-
-# assemble model architecture to match the Motaman paper
-
-# Dilated CNN Architecture (Motaman et al., 2025)
-
-# run the training process
-
-# evaluate the model similar to the previous evaluation of WESAD with they hybrid and TD features only
-
-# output the results
-
 """
 CNN classification of the WESAD dataset based on PPG signals labels stress and non-stress
 Based on Motaman et al. (2025) Dilated CNN architecture

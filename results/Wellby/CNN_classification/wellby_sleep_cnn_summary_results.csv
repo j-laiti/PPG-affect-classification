@@ -1,0 +1,2 @@
+Model,Average Precision (AUPOC),AUC,Balanced Accuracy,Best Parameters
+End-to-End CNN,82.58 ± 16.28,73.36 ± 18.95,64.81 ± 20.95,Dilated CNN with 3-fold CV

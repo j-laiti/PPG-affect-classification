@@ -1,0 +1,7 @@
+Model,Average Precision (AUPOC),AUC,Balanced Accuracy,Best Parameters
+Random Forest,77.48 ± 9.70,61.08 ± 14.74,51.95 ± 13.49,"{'bootstrap': False, 'max_depth': None, 'min_samples_leaf': 2, 'min_samples_split': 2, 'n_estimators': 100}"
+AdaBoost,81.57 ± 9.29,66.95 ± 17.59,55.89 ± 16.06,"{'learning_rate': 0.1, 'n_estimators': 50}"
+K-Neighbors,68.83 ± 12.53,50.33 ± 19.42,47.62 ± 3.37,"{'n_neighbors': 3, 'weights': 'uniform'}"
+LDA,78.80 ± 10.38,58.61 ± 16.00,50.69 ± 4.28,"{'shrinkage': None, 'solver': 'lsqr'}"
+SVM,85.84 ± 11.20,68.58 ± 23.07,57.11 ± 19.04,"{'C': 10, 'gamma': 1, 'kernel': 'linear'}"
+Gradient Boosting,75.56 ± 7.67,52.65 ± 12.69,59.82 ± 7.68,"{'learning_rate': 0.1, 'max_depth': 3, 'min_samples_leaf': 1, 'min_samples_split': 5, 'n_estimators': 50}"
