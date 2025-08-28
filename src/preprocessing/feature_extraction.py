@@ -7,7 +7,7 @@ import types
 # import nolds
 from nolds.measures import sampen, corr_dim
 from scipy import stats
-from preprocessing.peak_detection import threshold_peakdetection
+from peak_detection import threshold_peakdetection
 
 def calc_RRI(peaklist, fs):
     if len(peaklist) < 2:

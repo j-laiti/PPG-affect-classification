@@ -1,0 +1,2 @@
+training_time_s,model_size_KB,cnn_model_size_KB,scaler_size_KB,total_deployment_size_KB,average_inference_time_ms,std_inference_time_ms,successful_inferences,total_features,cnn_features,td_features
+0.002169915000195033,11.6201171875,33.4150390625,1.4326171875,46.4677734375,3.368999829990571,0.6216200797871082,100,42,32,10

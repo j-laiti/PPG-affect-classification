@@ -1,7 +1,7 @@
 Model,AUC,AUC_SD,Accuracy,Accuracy_SD,F1 Score,F1_SD,Best Parameters
-Random Forest,73.33,5.385,76.67,6.406,73.38,8.051,"{'bootstrap': True, 'max_depth': 5, 'min_samples_split': 5, 'n_estimators': 50}"
-AdaBoost,73.93,6.576,75.00,4.636,67.02,5.406,"{'algorithm': 'SAMME', 'learning_rate': 0.1, 'n_estimators': 200}"
-K-Neighbors,76.22,12.950,83.33,2.747,83.33,4.064,"{'metric': 'manhattan', 'n_neighbors': 3, 'p': 1, 'weights': 'distance'}"
-LDA,67.41,8.287,75.00,3.399,73.16,3.295,"{'shrinkage': 0.9, 'solver': 'lsqr'}"
-SVM,72.00,14.474,78.33,3.748,73.24,4.751,"{'C': 1, 'coef0': 0.0, 'degree': 4, 'gamma': 'scale', 'kernel': 'poly'}"
-Gradient Boosting,68.15,6.564,83.33,4.200,80.00,4.635,"{'learning_rate': 0.2, 'max_depth': 4, 'max_features': 'sqrt', 'min_samples_leaf': 2, 'min_samples_split': 5, 'n_estimators': 50, 'subsample': 0.9}"
+Random Forest,73.19,13.363,76.67,4.800,75.37,5.470,"{'bootstrap': False, 'max_depth': 5, 'min_samples_split': 2, 'n_estimators': 100}"
+AdaBoost,65.41,8.770,78.33,6.421,71.42,8.481,"{'algorithm': 'SAMME', 'learning_rate': 0.1, 'n_estimators': 200}"
+K-Neighbors,74.22,11.371,80.00,7.233,78.12,8.557,"{'metric': 'euclidean', 'n_neighbors': 7, 'p': 1, 'weights': 'distance'}"
+LDA,66.22,6.802,75.00,4.612,73.16,4.703,"{'shrinkage': 0.9, 'solver': 'lsqr'}"
+SVM,76.89,18.783,71.67,10.196,72.86,9.687,"{'C': 100, 'coef0': 0.1, 'degree': 4, 'gamma': 'auto', 'kernel': 'poly'}"
+Gradient Boosting,78.07,8.336,80.00,3.788,74.51,6.426,"{'learning_rate': 0.05, 'max_depth': 3, 'max_features': 'log2', 'min_samples_leaf': 2, 'min_samples_split': 5, 'n_estimators': 50, 'subsample': 0.9}"

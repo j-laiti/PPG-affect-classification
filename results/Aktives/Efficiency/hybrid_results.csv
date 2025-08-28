@@ -1,0 +1,2 @@
+training_time_s,model_size_KB,total_deployment_size_KB,average_inference_time_ms,std_inference_time_ms
+0.009383814000102575,44.03125,45.4169921875,47.226673469981506,27.57807073840852

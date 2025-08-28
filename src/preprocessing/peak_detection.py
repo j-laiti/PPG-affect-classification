@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.signal import find_peaks
-from preprocessing.filters import moving_average_filter
+from filters import moving_average_filter
 
 #%% Peak detection functions
 

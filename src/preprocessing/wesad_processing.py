@@ -16,8 +16,8 @@ import pandas as pd
 #%%
 
 from scipy.interpolate import UnivariateSpline
-from preprocessing.feature_extraction import *
-from preprocessing.filters import *
+from feature_extraction import *
+from filters import *
 
 # +
 WINDOW_IN_SECONDS = 120
@@ -117,7 +117,7 @@ def seperate_data_by_label(df):
 
 
 
-def get_samples(data, label, ma_usage):
+def get_samples(data, raw_data, label, ma_usage):
     global feat_names
     global WINDOW_IN_SECONDS
 
@@ -132,15 +132,31 @@ def get_samples(data, label, ma_usage):
     i = 0
     while sliding_window_len * i <= len(data) - window_len:
         
-         # 한 윈도우에 해당하는 모든 윈도우 담기,
         w = data[sliding_window_len * i: (sliding_window_len * i) + window_len]  
+        raw_window = raw_data[sliding_window_len * i: (sliding_window_len * i) + window_len]
+        
+        # Extract the actual signal values
+        processed_signal = w['BVP'].tolist()
+        raw_signal = raw_window['BVP'].tolist()
+
+        # smooth the signal being passed in
+        smoothed_signal = moving_average_filter(processed_signal, window_size=3)
+
         # Calculate stats for window
-        wstats = get_ppg_features(ppg_seg=w['BVP'].tolist(), fs = fs_dict['BVP'] , label=label, calc_sq=False)
+        wstats = get_ppg_features(
+            ppg_seg=smoothed_signal, 
+            fs=fs_dict['BVP'], 
+            label=label, 
+            raw_ppg_signal=raw_signal,
+            calc_sq=True
+        )
+
         winNum += 1
         
         if wstats == []:
             i += 1
             continue;
+        
         # Seperating sample and label
         x = pd.DataFrame(wstats, index = [i])
     
@@ -180,7 +196,7 @@ def make_patient_data(subject_id, ma_usage):
     global WINDOW_IN_SECONDS
     
     temp_ths = [1.0,2.0,1.8,1.5] 
-    clean_df = pd.read_csv('../../data/WESAD/clean_signal_by_rate.csv',index_col=0)
+    # clean_df = pd.read_csv('../../data/WESAD/clean_signal_by_rate.csv',index_col=0)
     cycle = 15
     
     # Make subject data object for Sx
@@ -210,10 +226,10 @@ def make_patient_data(subject_id, ma_usage):
         # bp_bvp = np.mean(np.vstack((fwd,bwd[::-1])), axis=0)
         df['BVP'] = smoothed_signal
 
-        segment_stds, std_ths = simple_dynamic_threshold(smoothed_signal, fs_dict['BVP'], 85, window_size= 3)
+        segment_stds, std_ths = simple_dynamic_threshold(smoothed_signal, fs_dict['BVP'], 95, window_size= 3)
 
         # Print the dynamic threshold and standard deviations
-        print(f"Dynamic Threshold (95th Percentile): {std_ths}")
+        print(f"Dynamic Threshold (_th Percentile): {std_ths}")
         print(f"Segment Standard Deviations: {segment_stds}")
 
         sim_clean_signal, clean_signal_indices = simple_noise_elimination(smoothed_signal, fs_dict['BVP'], std_ths)
@@ -228,12 +244,19 @@ def make_patient_data(subject_id, ma_usage):
         # plt.plot(df['BVP'][:6000], color = 'b', linewidth=2.5)
     
     
-    grouped, baseline, stress, amusement = seperate_data_by_label(df)   
+    grouped, baseline, stress, amusement = seperate_data_by_label(df) 
+    
+    # Create raw signal DataFrame with same structure as processed data
+    df_raw = pd.DataFrame({'BVP': df_BVP})
+    if 'label' in df.columns:
+        df_raw['label'] = df['label']
+    
+    grouped_raw, baseline_raw, stress_raw, amusement_raw = seperate_data_by_label(df_raw)
     
     
-    baseline_samples = get_samples(baseline, 0, ma_usage)
-    stress_samples = get_samples(stress, 1, ma_usage)
-    amusement_samples = get_samples(amusement, 0, ma_usage)
+    baseline_samples = get_samples(baseline, baseline_raw, 0, ma_usage)
+    stress_samples = get_samples(stress, stress_raw, 1, ma_usage)
+    amusement_samples = get_samples(amusement,amusement_raw, 0, ma_usage)
     
     print("stress: ",len(stress_samples))
     print("non-stress: ",len(amusement_samples)+len(baseline_samples))
@@ -282,8 +305,8 @@ for n in NOISE:
         ENSEMBLE = True
 
 
-    subject_feature_path = '/subject_extracted_features_' + n + str(WINDOW_IN_SECONDS)
-    merged_path = '/data_merged_' + n +'.csv'
+    subject_feature_path = '/subject_extracted_features_sqi3_' + n + str(WINDOW_IN_SECONDS)
+    merged_path = '/WESAD_features_sqi3_' + n +'.csv'
     
     if not os.path.exists(savePath + subject_feature_path):
         os.makedirs(savePath + subject_feature_path)

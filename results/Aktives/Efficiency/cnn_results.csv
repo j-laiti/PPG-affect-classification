@@ -1,0 +1,2 @@
+model,training_time_s,model_size_KB,avg_inference_time_ms,std_inference_time_ms,total_params
+Dilated CNN,30.88559341430664,6791.8974609375,2.074141502380371,0.29808638509929547,1732994
