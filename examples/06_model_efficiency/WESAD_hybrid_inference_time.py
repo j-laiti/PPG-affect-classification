@@ -15,11 +15,11 @@ from scipy import stats
 import csv
 
 # Add path for preprocessing functions
-sys.path.append('../../src/')
+sys.path.append('../..')
 from preprocessing.feature_extraction import get_ppg_features
-from preprocessing.filters import bandpass_filter, moving_average_filter, standardize
+from preprocessing.filters import bandpass_filter, moving_average_filter, standardize, simple_dynamic_threshold, simple_noise_elimination
 
-# ===== CNN CLASSES (from your hybrid code) =====
+#%% ===== CNN CLASSES (from your hybrid code) =====
 class Simple1DCNNFeatures(nn.Module):
     """Simple CNN for feature extraction from PPG signals"""
     def __init__(self, input_length=7680, output_features=32):
@@ -124,7 +124,7 @@ def read_hybrid_csv(path, testset_num):
     
     if len(test_df) == 0:
         print(f"WARNING: No data found for test subject S{testset_num}")
-        return None, None, None, None, None
+        return None, None, None, None, None, None
     
     # Extract features and labels
     X_train = train_df[feature_cols].values
@@ -137,7 +137,8 @@ def read_hybrid_csv(path, testset_num):
     print(f"Train label distribution: {np.bincount(y_train)}")
     print(f"Test label distribution: {np.bincount(y_test)}")
     
-    return X_train, y_train, X_test, y_test, feature_cols
+    # Return the test dataframe for inference sample selection
+    return X_train, y_train, X_test, y_test, feature_cols, test_df
 
 def SVM_model_with_timing(X_train, y_train, X_test, y_test):
     """SVM model with timing measurements (no GridSearch - consistent with WESAD TD approach)"""
@@ -232,7 +233,7 @@ def train_cnn_for_efficiency_test(X_train, y_train, device):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
     
     # Quick training (reduced epochs for efficiency testing)
-    epochs = 15  # Reduced from 30
+    epochs = 1  # Reduced from 30
     best_val_acc = 0.0
     
     for epoch in range(epochs):
@@ -264,116 +265,115 @@ def train_cnn_for_efficiency_test(X_train, y_train, device):
             val_acc = 100 * val_correct / val_total
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
-                torch.save(model.state_dict(), f'temp_best_cnn_s{device.type}.pth')
+                torch.save(model.state_dict(), f'temp_best_wesad_cnn.pth')
             
             print(f"       Epoch {epoch+1}: Val Acc: {val_acc:.1f}%")
         
         torch.cuda.empty_cache()
     
     # Load best model
-    model.load_state_dict(torch.load(f'temp_best_cnn_s{device.type}.pth'))
+    model.load_state_dict(torch.load(f'temp_best_wesad_cnn.pth'))
     print(f"     CNN training completed. Best val acc: {best_val_acc:.1f}%")
     
     return model
 
-def extract_hybrid_features_for_inference_sample(test_data_path, trained_model, device):
-    """Extract hybrid features for inference timing from test CSV file"""
-    # Configuration
-    WINDOW_SIZE = 120
-    SAMPLING_RATE = 64
-    WINDOW_SAMPLES = WINDOW_SIZE * SAMPLING_RATE
+def extract_hybrid_features_for_inference_sample(subject_id, trained_model, device, fs=64):
+    """Extract hybrid features for inference timing using WESAD dataset structure (CONSISTENT WITH AKTIVES)"""
+    
+    # Configuration - WESAD specific
+    WINDOW_SAMPLES = 120 * 64  # 120s at 64Hz (same as training)
+    DATA_PATH = '../../data/WESAD_BVP_extracted/'
     
     try:
-        # Load raw PPG data from CSV file (same as TD approach)
-        raw_ppg_df = pd.read_csv(test_data_path)
-        raw_ppg = raw_ppg_df.iloc[:, 0].values
-        
-        # Remove NaN values
-        clean_ppg_values = raw_ppg[~np.isnan(raw_ppg)]
-        
-        if len(clean_ppg_values) < WINDOW_SAMPLES:
-            # If signal is shorter than expected window, use what we have
-            window = clean_ppg_values
-        else:
-            # Extract window of expected size
-            window = clean_ppg_values[:WINDOW_SAMPLES]
-        
-        # === PREPROCESSING PIPELINE (same as TD approach) ===
-        #  Standardize
-        ppg_standardized = standardize(window)
-        
-        # Apply filtering
-        bp_bvp = bandpass_filter(ppg_standardized, 0.5, 10, 64, order=2)
-        smoothed_signal = moving_average_filter(bp_bvp, window_size=5)
-        
-        # Ensure we have enough data for both CNN and TD feature extraction
-        if len(smoothed_signal) < 640:  # Need at least 10 seconds for TD features
-            print(f"Warning: Signal too short after preprocessing: {len(smoothed_signal)} samples")
+        # Load subject data (similar to AKTIVES approach but using WESAD structure)
+        subject_file = os.path.join(DATA_PATH, f'S{subject_id}.csv')
+        if not os.path.exists(subject_file):
+            print(f"Subject file not found: {subject_file}")
             return None
-            
-        # === CNN FEATURE EXTRACTION ===
-        # Prepare signal for CNN (need exactly WINDOW_SAMPLES)
-        if len(smoothed_signal) >= WINDOW_SAMPLES:
-            cnn_window = smoothed_signal[:WINDOW_SAMPLES]
-        else:
-            # Pad if necessary
-            cnn_window = np.pad(smoothed_signal, (0, WINDOW_SAMPLES - len(smoothed_signal)), mode='edge')
+        
+        df = pd.read_csv(subject_file)
 
-        window_norm = (cnn_window - np.mean(cnn_window)) / (np.std(cnn_window) + 1e-8)
-        window_tensor = torch.FloatTensor(window_norm).unsqueeze(0).unsqueeze(0).to(device)
-        
-        with torch.no_grad():
-            cnn_features = trained_model.extract_features_only(window_tensor)
-            cnn_features_np = cnn_features.cpu().numpy().flatten()
-        
-        # === TIME-DOMAIN FEATURE EXTRACTION ===
-        td_stats = get_ppg_features(ppg_seg=smoothed_signal.tolist(), 
-                                  fs=64, 
-                                  label=1, 
-                                  calc_sq=True)
-        
-        if td_stats is None or len(td_stats) <= 1:
-            print("Warning: TD feature extraction failed")
-            return None
+        # begin feature extraction timing
+        feature_extraction_start_time = time.perf_counter()
+
+        # Get a sample window from the subject's data (take first available window)
+        # Try stress data first, then non-stress
+        for label_value in [1.0, 0.0]:
+            label_data = df[df['label'] == label_value]['BVP'].values
             
-        # Remove label and handle SQI
-        if 'sqi' in td_stats:
-            td_stats['SQI'] = td_stats.pop('sqi')
-        td_stats.pop('label', None)
-        
-        # Convert TD stats to array (matching the feature order from training)
-        td_feature_names = ['HR_mean','HR_std','meanNN','SDNN','medianNN','meanSD','SDSD','RMSSD','pNN20','pNN50']
-        if 'SQI' in td_stats:
-            td_feature_names.append('SQI')
-            
-        td_features = [td_stats.get(feat, 0.0) for feat in td_feature_names]
-        
-        # === COMBINE FEATURES ===
-        # CNN features first, then TD features (matching training order)
-        combined_features = list(cnn_features_np) + td_features
-        
-        return combined_features
+            if len(label_data) >= WINDOW_SAMPLES:
+                # Take the first window
+                window = label_data[:WINDOW_SAMPLES]
+                
+                # ===== CNN FEATURE EXTRACTION =====
+                # Normalize for CNN (following WESAD approach)
+                window_norm = (window - np.mean(window)) / (np.std(window) + 1e-8)
+                window_tensor = torch.FloatTensor(window_norm).unsqueeze(0).unsqueeze(0).to(device)
+                
+                with torch.no_grad():
+                    cnn_features = trained_model.extract_features_only(window_tensor)
+                    cnn_features_np = cnn_features.cpu().numpy().flatten()
+                
+                # ===== TIME-DOMAIN FEATURE EXTRACTION =====
+                # Apply preprocessing pipeline (same as hybrid approach)
+                clean_ppg_values = window[~np.isnan(window)]
+                ppg_standardized = standardize(clean_ppg_values)
+
+                bp_bvp = bandpass_filter(ppg_standardized, 0.2, 10, 64, order=2)
+                smoothed_signal = moving_average_filter(bp_bvp, window_size=5)
+                
+                segment_stds, std_ths = simple_dynamic_threshold(smoothed_signal, 64, 95, window_size=3)
+                sim_clean_signal, clean_signal_indices = simple_noise_elimination(smoothed_signal, 64, std_ths)
+                sim_final_clean_signal = moving_average_filter(sim_clean_signal, window_size=3)
+                
+                td_stats = get_ppg_features(ppg_seg=sim_final_clean_signal.tolist(), 
+                                          fs=64, 
+                                          label=int(label_value), 
+                                          calc_sq=False)
+                
+                if td_stats is None or len(td_stats) <= 1:
+                    print("Warning: TD feature extraction failed")
+                    continue
+                
+                # Remove label from td_stats
+                td_stats.pop('label', None)
+                
+                # Handle TD features (convert dict to list matching training order)
+                if isinstance(td_stats, dict):
+                    td_features = list(td_stats.values())
+                else:
+                    td_features = td_stats
+                
+                # === COMBINE FEATURES (CNN first, then TD - matching training order) ===
+                combined_features = list(cnn_features_np) + td_features
+                
+                feature_extraction_end_time = time.perf_counter()
+                feature_extraction_duration = feature_extraction_end_time - feature_extraction_start_time
+
+                return combined_features, feature_extraction_duration
+
+        return None
         
     except Exception as e:
-        print(f"Error extracting hybrid features: {e}")
+        print(f"Error extracting hybrid features for S{subject_id}: {e}")
         import traceback
         traceback.print_exc()
         return None
 
-def measure_hybrid_inference_time(test_data_path, trained_model, svm_model, scaler, device, n_tests=100):
-    """Measure complete hybrid inference time including preprocessing, CNN, TD features, and SVM prediction"""
-    print(f"   Measuring hybrid inference time with test file: {test_data_path}")
+def measure_hybrid_inference_time(subject_id, trained_model, svm_model, scaler, device, n_tests=100):
+    """Measure complete hybrid inference time using actual WESAD subject data (CONSISTENT WITH AKTIVES)"""
+    print(f"   Measuring hybrid inference time with subject S{subject_id} data...")
     
     inference_times = []
     successful_inferences = 0
     
     for i in range(n_tests):
-        start_time = time.perf_counter()
         
         try:
             # Step 1: Extract hybrid features (includes full preprocessing pipeline + CNN + TD)
-            hybrid_features = extract_hybrid_features_for_inference_sample(test_data_path, trained_model, device)
+            hybrid_features, feature_extraction_duration = extract_hybrid_features_for_inference_sample(subject_id, trained_model, device)
             
+            model_prediction_start_time = time.perf_counter()
             if hybrid_features is not None:
                 # Step 2: Scale features
                 feature_vector = np.array(hybrid_features).reshape(1, -1)
@@ -389,9 +389,10 @@ def measure_hybrid_inference_time(test_data_path, trained_model, svm_model, scal
         except Exception as e:
             print(f"Error in inference {i}: {e}")
             
-        end_time = time.perf_counter()
-        inference_times.append((end_time - start_time) * 1000)  # Convert to milliseconds
-    
+        model_prediction_end_time = time.perf_counter()
+        model_prediction_duration = model_prediction_end_time - model_prediction_start_time
+        inference_times.append((feature_extraction_duration + model_prediction_duration) * 1000)  # Convert to milliseconds
+
     if len(inference_times) == 0:
         print("No successful inferences!")
         return np.nan, np.nan
@@ -405,29 +406,30 @@ def measure_hybrid_inference_time(test_data_path, trained_model, svm_model, scal
     
     return avg_inference_time, std_inference_time
 
-# Update the main evaluation function to use the test CSV file
+# Update the main evaluation function to use actual subject data for inference
 def run_hybrid_efficiency_evaluation():
     print("\n" + "="*50)
-    print("WESAD HYBRID FEATURES - EFFICIENCY MEASUREMENT")
+    print("WESAD HYBRID FEATURES - EFFICIENCY MEASUREMENT (CONSISTENT WITH AKTIVES)")
     print("="*50)
     
     # Configuration
     COMBINED_DATA_PATH = '../../data/all_subjects_WESAD_hybrid_features.csv'
     BVP_DATA_PATH = '../../data/WESAD_BVP_extracted/'
-    TEST_DATA_PATH = '../../data/WESAD_inference_test_signal.csv'  # Add test signal path
-    RESULTS_PATH_ALL = '../../results/WESAD/Efficiency/hybrid_results.csv'
-    RESULTS_PATH_DETAILED = '../../results/WESAD/Efficiency/hybrid_efficiency_detailed.csv'
+    RESULTS_PATH_ALL = 'WESAD_hybrid_results.csv'
+    RESULTS_PATH_DETAILED = 'WESAD_hybrid_efficiency_detailed.csv'
     
     subjects = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17]
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     print(f"Using device: {device}")
+
+    cnn_training_time = np.nan
     
     # Train CNN ONCE for all inference timing (not per LOGO fold)
     print("Training CNN once for inference timing...")
     trained_model = None
     try:
         # Load training data from first few subjects for CNN
-        training_subjects = [2, 3, 4, 5, 6]  # Fixed set for CNN training
+        training_subjects = [2,3,4,5,6]  # Fixed set for CNN training
         training_data_list = []
         
         for train_subj in training_subjects:
@@ -444,8 +446,12 @@ def run_hybrid_efficiency_evaluation():
             X_cnn_train, y_cnn_train = prepare_training_data_for_cnn(training_data_list, WINDOW_SAMPLES, STEP_SAMPLES)
             
             if len(X_cnn_train) >= 50:
+                cnn_start = time.perf_counter()
                 trained_model = train_cnn_for_efficiency_test(X_cnn_train, y_cnn_train, device)
+                cnn_end = time.perf_counter()
+                cnn_training_time = cnn_end - cnn_start
                 print("✓ CNN trained successfully for inference timing")
+                print(f"  CNN training time: {cnn_training_time:.2f} seconds")
             else:
                 print("⚠ Insufficient CNN training data")
     except Exception as e:
@@ -467,7 +473,7 @@ def run_hybrid_efficiency_evaluation():
         
         try:
             # Step 1: Load hybrid features for SVM training
-            X_train, y_train, X_test, y_test, feature_cols = read_hybrid_csv(COMBINED_DATA_PATH, sub)
+            X_train, y_train, X_test, y_test, feature_cols, test_df = read_hybrid_csv(COMBINED_DATA_PATH, sub)
             
             if X_train is None:
                 print(f"Skipping subject S{sub} - no data")
@@ -488,17 +494,14 @@ def run_hybrid_efficiency_evaluation():
                 X_train, y_train, X_test, y_test
             )
             
-            # Step 3: Measure hybrid inference time using test CSV file
-            if trained_model is not None and os.path.exists(TEST_DATA_PATH):
-                print("Measuring hybrid inference time with test signal...")
+            # Step 3: Measure hybrid inference time using actual subject data (CONSISTENT WITH AKTIVES)
+            if trained_model is not None:
+                print("Measuring hybrid inference time with actual subject data...")
                 avg_inf_time, std_inf_time = measure_hybrid_inference_time(
-                    TEST_DATA_PATH, trained_model, svm_model, sc, device
+                    sub, trained_model, svm_model, sc, device
                 )
             else:
-                if trained_model is None:
-                    print("No CNN model available - skipping inference timing")
-                if not os.path.exists(TEST_DATA_PATH):
-                    print(f"Test signal file not found: {TEST_DATA_PATH}")
+                print("No CNN model available - skipping inference timing")
                 avg_inf_time, std_inf_time = np.nan, np.nan
             
             # Store results
@@ -553,16 +556,13 @@ def run_hybrid_efficiency_evaluation():
     # Save results
     print(f"\nSaving results...")
     
-    # Create results directory if it doesn't exist
-    os.makedirs('../../results/WESAD/Efficiency', exist_ok=True)
-    
     # Save efficiency details
     efficiency_results = pd.DataFrame({
         'subject': valid_subjects,
         'auc_roc': SVM_AUC,
         'f1_score': SVM_F1,
         'accuracy': SVM_ACC,
-        'training_time_s': training_times,
+        'svm_training_time_s': training_times,
         'model_size_KB': model_sizes,
         'deployment_size_KB': deployment_sizes,
         'avg_inference_time_ms': avg_inference_times,
@@ -574,6 +574,7 @@ def run_hybrid_efficiency_evaluation():
     # Save summary for comparison with other approaches
     summary_results = {
         'approach': 'hybrid_cnn_td',
+        'CNN_training_time_s': cnn_training_time,
         'mean_training_time_s': np.mean(training_times),
         'std_training_time_s': np.std(training_times),
         'mean_model_size_KB': np.mean(model_sizes),
@@ -592,3 +593,7 @@ def run_hybrid_efficiency_evaluation():
     print(f"  - {RESULTS_PATH_DETAILED}")
     
     return efficiency_results
+
+if __name__ == "__main__":
+    run_hybrid_efficiency_evaluation()
+# %%

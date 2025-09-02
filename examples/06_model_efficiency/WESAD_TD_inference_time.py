@@ -1,4 +1,4 @@
-#%% Efficiency Measurement Script for the WESAD dataset using TD features only
+#%% Efficiency Measurement Script for the WESAD dataset using TD features only - CONSISTENT WITH AKTIVES
 import time
 import sys
 import os
@@ -14,7 +14,7 @@ from sklearn.metrics import roc_auc_score, accuracy_score, f1_score
 import csv
 
 # import processing functions
-sys.path.append('../../src/')
+sys.path.append('../..')
 
 from preprocessing.feature_extraction import get_ppg_features
 from preprocessing.filters import bandpass_filter, moving_average_filter, standardize, simple_dynamic_threshold, simple_noise_elimination
@@ -48,7 +48,7 @@ def SVM_model_with_timing(X_train, y_train, X_test, y_test):
     Simple SVM model with timing measurements (no GridSearch - matches existing WESAD analysis)
     """
     # Measure training time
-    start_time = time.time()
+    start_time = time.perf_counter()
     start_memory = psutil.Process().memory_info().rss / (1024 * 1024)
     
     # Simple SVM (matching your existing approach)
@@ -56,7 +56,7 @@ def SVM_model_with_timing(X_train, y_train, X_test, y_test):
     model.fit(X_train, y_train)
     
     # End training timing
-    end_time = time.time()
+    end_time = time.perf_counter()
     end_memory = psutil.Process().memory_info().rss / (1024 * 1024)
     
     training_time = end_time - start_time
@@ -81,71 +81,93 @@ def SVM_model_with_timing(X_train, y_train, X_test, y_test):
     
     return AUC, F1, accuracy, training_time, model_size_kb, total_deployment_size_kb, model
 
-def measure_inference_time(model, scaler, n_tests=100):
-    """
-    Measure inference time for a single sample using raw PPG data from CSV file
+def extract_td_features_for_inference_sample(subject_id, fs=64):
+    """Extract TD features for inference timing using WESAD dataset structure (CONSISTENT WITH AKTIVES)"""
     
-    # load the raw data from CSV
-    # process the raw data (standardize, bandpass filter, smooth, and noise elimination)
-    # extract features and make prediction with processed data
-    """
+    # Configuration - WESAD specific
+    WINDOW_SAMPLES = 120 * 64  # 120s at 64Hz (same as training)
+    DATA_PATH = '../../data/WESAD_BVP_extracted/'
     
-    # Load the raw PPG data from CSV (assuming first column contains PPG values)
     try:
-        raw_ppg_df = pd.read_csv(test_data_path, index_col=0)
-        # Get the first column (assuming it contains PPG values)
-        raw_ppg = raw_ppg_df.iloc[:, 0].values
-        print(f"Loaded {len(raw_ppg)} PPG samples from {test_data_path}")
+        # Load subject data (similar to AKTIVES approach but using WESAD structure)
+        subject_file = os.path.join(DATA_PATH, f'S{subject_id}.csv')
+        if not os.path.exists(subject_file):
+            print(f"Subject file not found: {subject_file}")
+            return None
+        
+        df = pd.read_csv(subject_file)
+        
+        # Get a sample window from the subject's data (take first available window)
+        # Try stress data first, then non-stress
+        for label_value in [1.0, 0.0]:
+            label_data = df[df['label'] == label_value]['BVP'].values
+            
+            if len(label_data) >= WINDOW_SAMPLES:
+                # Take the first window
+                window = label_data[:WINDOW_SAMPLES]
+
+                # ===== TIME-DOMAIN FEATURE EXTRACTION =====
+                td_extraction_time_start = time.perf_counter()
+                # Process for TD features (same as before)
+                clean_ppg_values = window[~np.isnan(window)]
+                ppg_standardized = standardize(clean_ppg_values)
+                
+                # Apply preprocessing pipeline (same as TD approach)
+                bp_bvp = bandpass_filter(ppg_standardized, 0.2, 10, 64, order=2)
+                smoothed_signal = moving_average_filter(bp_bvp, window_size=5)
+                
+                segment_stds, std_ths = simple_dynamic_threshold(smoothed_signal, 64, 95, window_size=3)
+                sim_clean_signal, clean_signal_indices = simple_noise_elimination(smoothed_signal, 64, std_ths)
+                sim_final_clean_signal = moving_average_filter(sim_clean_signal, window_size=3)
+                
+                td_stats = get_ppg_features(ppg_seg=sim_final_clean_signal.tolist(), 
+                                          fs=64, 
+                                          label=int(label_value), 
+                                          calc_sq=True)
+                
+                if td_stats is None or len(td_stats) <= 1:
+                    print("Warning: TD feature extraction failed")
+                    continue
+                
+                # Process features to match training format
+                if 'sqi' in td_stats:
+                    td_stats['SQI'] = td_stats.pop('sqi')
+                td_stats.pop('label', None)
+                
+                td_extraction_time_end = time.perf_counter()
+                td_extraction_time = td_extraction_time_end - td_extraction_time_start
+                
+                # Return processed features
+                return td_stats, td_extraction_time
+        
+        print(f"No suitable window found for subject S{subject_id}")
+        return None
+        
     except Exception as e:
-        print(f"Error loading test data from {test_data_path}: {e}")
-        return np.nan, np.nan
-    
-    # Check if we have enough data
-    if len(raw_ppg) < 128:
-        print(f"Warning: PPG signal is too short ({len(raw_ppg)} samples). Need at least 128 samples.")
-        return np.nan, np.nan
-    
-    # Remove NaN values
-    clean_ppg_values = raw_ppg[~np.isnan(raw_ppg)]
-    
-    if len(clean_ppg_values) < 128:
-        print(f"Warning: After removing NaN values, PPG signal is too short ({len(clean_ppg_values)} samples).")
-        return np.nan, np.nan
+        print(f"Error extracting TD features for S{subject_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def measure_inference_time(subject_id, model, scaler, feats, n_tests=100):
+    """
+    Measure inference time using actual WESAD subject data (CONSISTENT WITH AKTIVES)
+    """
+    print(f"   Measuring TD inference time with subject S{subject_id} data...")
     
     inference_times = []
     successful_inferences = 0
 
-    print(f"Running {n_tests} inference tests with {len(clean_ppg_values)} PPG samples...")
+    print(f"Running {n_tests} inference tests with subject S{subject_id}...")
     
     for i in range(n_tests):
-        start_time = time.perf_counter()
 
         try:
-            # Process for TD features
-            ppg_standardized = standardize(clean_ppg_values)
+            # Extract TD features from actual subject data
+            td_stats, td_extraction_time = extract_td_features_for_inference_sample(subject_id)
             
-            # Apply filtering for TD features
-            bp_bvp = bandpass_filter(ppg_standardized, 0.5, 10, 64, order=2)
-            smoothed_signal = moving_average_filter(bp_bvp, window_size=5)
-
-            # Apply noise elimination
-            segment_stds, std_ths = simple_dynamic_threshold(smoothed_signal, 64, 95)
-            clean_signal, clean_indices = simple_noise_elimination(smoothed_signal, 64, std_ths)
-            
-            # Final smoothing
-            final_clean_signal = moving_average_filter(clean_signal, window_size=3)
-            
-            # Extract TD features
-            td_stats = get_ppg_features(ppg_seg=final_clean_signal.tolist(), 
-                                      fs=64, 
-                                      label=1, 
-                                      calc_sq=True)
-
-            # Process features if extraction was successful
-            if td_stats is not None and 'sqi' in td_stats:
-                td_stats['SQI'] = td_stats.pop('sqi')
-                td_stats.pop('label', None)
-
+            if td_stats is not None:
+                feature_prediction_time_start = time.perf_counter()
                 # Ensure feature order matches training (exclude 'subject' and 'label')
                 feature_names = [feat for feat in feats if feat not in ['subject', 'label']]
                 feature_vector = np.array([td_stats[feat] for feat in feature_names]).reshape(1, -1)
@@ -163,8 +185,9 @@ def measure_inference_time(model, scaler, n_tests=100):
         except Exception as e:
             print(f"Error in inference {i}: {e}")
             
-        end_time = time.perf_counter()
-        inference_times.append((end_time - start_time) * 1000)  # Convert to milliseconds
+        feature_prediction_time_end = time.perf_counter()
+        feature_prediction_time = feature_prediction_time_end - feature_prediction_time_start
+        inference_times.append((feature_prediction_time + td_extraction_time) * 1000)  # Convert to milliseconds
     
     if len(inference_times) == 0:
         print("No successful inferences!")
@@ -179,17 +202,16 @@ def measure_inference_time(model, scaler, n_tests=100):
     
     return avg_inference_time, std_inference_time
 
-#%% Main execution with efficiency measurements
+#%% Main execution with efficiency measurements - CONSISTENT WITH AKTIVES
 print("\n" + "="*50)
-print("WESAD TD FEATURES - EFFICIENCY MEASUREMENT")
+print("WESAD TD FEATURES - EFFICIENCY MEASUREMENT (CONSISTENT WITH AKTIVES)")
 print("="*50)
 
 # Data definitions
 data_path = '../../data/WESAD_all_subjects_TD_features.csv'
-test_data_path = '../../data/WESAD_inference_test_signal.csv'
 
-result_path_all = '../../results/WESAD/Efficiency/TD_results.csv'
-result_path_efficiency = '../../results/WESAD/Efficiency/TD_efficiency_detailed.csv'
+result_path_all = 'WESAD_TD_results.csv'
+result_path_efficiency = 'WESAD_TD_efficiency_detailed.csv'
 
 feats = ['HR_mean','HR_std','meanNN','SDNN','medianNN','meanSD','SDSD','RMSSD','pNN20','pNN50','subject','label']
 
@@ -203,36 +225,47 @@ avg_inference_times, std_inference_times = [], []
 print(f"Running LOGO validation for {len(subjects)} subjects...")
 
 for i, sub in enumerate(subjects):
-    print(f"\n--- Subject {sub} ({i+1}/{len(subjects)}) ---")
+    print(f"\n{'='*40}")
+    print(f"Subject S{sub} ({i+1}/{len(subjects)})")
+    print(f"{'='*40}")
     
-    df, X_train, y_train, X_test, y_test = read_csv(data_path, feats, sub)
-    df = df.fillna(0)  # Fixed: was missing assignment
-    
-    # Normalization
-    sc = StandardScaler()  
-    X_train = sc.fit_transform(X_train)  
-    X_test = sc.transform(X_test)  
+    try:
+        df, X_train, y_train, X_test, y_test = read_csv(data_path, feats, sub)
+        df = df.fillna(0)  # Fixed: was missing assignment
+        
+        # Normalization
+        sc = StandardScaler()  
+        X_train = sc.fit_transform(X_train)  
+        X_test = sc.transform(X_test)  
 
-    # Train with efficiency measurements
-    auc_svm, f1_svm, acc_svm, train_time, model_size_kb, deploy_size_kb, model = SVM_model_with_timing(
-        X_train, y_train, X_test, y_test
-    )
-    
-    # Measure inference time using raw PPG data
-    avg_inf_time, std_inf_time = measure_inference_time(model, sc)
-    
-    # Store results
-    SVM_AUC.append(auc_svm*100)
-    SVM_F1.append(f1_svm*100)
-    SVM_ACC.append(acc_svm*100)
-    training_times.append(train_time)
-    model_sizes.append(model_size_kb)
-    deployment_sizes.append(deploy_size_kb)
-    avg_inference_times.append(avg_inf_time)
-    std_inference_times.append(std_inf_time)
-    
-    print(f"  AUC: {auc_svm*100:.2f}%, F1: {f1_svm*100:.2f}%, Acc: {acc_svm*100:.2f}%")
-    print(f"  Train time: {train_time:.3f}s, Model: {model_size_kb:.2f}KB, Inference: {avg_inf_time:.3f}ms")
+        # Train with efficiency measurements
+        auc_svm, f1_svm, acc_svm, train_time, model_size_kb, deploy_size_kb, model = SVM_model_with_timing(
+            X_train, y_train, X_test, y_test
+        )
+        
+        # Measure inference time using actual subject data (CONSISTENT WITH AKTIVES)
+        print("Measuring TD inference time with actual subject data...")
+        avg_inf_time, std_inf_time = measure_inference_time(sub, model, sc, feats)
+        
+        # Store results
+        SVM_AUC.append(auc_svm*100)
+        SVM_F1.append(f1_svm*100)
+        SVM_ACC.append(acc_svm*100)
+        training_times.append(train_time)
+        model_sizes.append(model_size_kb)
+        deployment_sizes.append(deploy_size_kb)
+        avg_inference_times.append(avg_inf_time)
+        std_inference_times.append(std_inf_time)
+        
+        print(f"Results for S{sub}:")
+        print(f"  AUC: {auc_svm*100:.2f}%, F1: {f1_svm*100:.2f}%, Acc: {acc_svm*100:.2f}%")
+        print(f"  Train time: {train_time:.3f}s, Model: {model_size_kb:.2f}KB, Inference: {avg_inf_time:.3f}ms")
+        
+    except Exception as e:
+        print(f"Error processing subject S{sub}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        continue
 
 # Calculate summary statistics (handle NaN values)
 valid_inference_times = [t for t in avg_inference_times if not np.isnan(t)]
@@ -259,15 +292,9 @@ if valid_inference_times:
 else:
     print("Avg Inference Time: No valid measurements")
 
-# Create results directory if it doesn't exist
-os.makedirs('../../results/WESAD/Efficiency', exist_ok=True)
-
 # Save efficiency details
 efficiency_results = pd.DataFrame({
     'subject': subjects,
-    'auc_roc': SVM_AUC,
-    'f1_score': SVM_F1,
-    'accuracy': SVM_ACC,
     'training_time_s': training_times,
     'model_size_KB': model_sizes,
     'deployment_size_KB': deployment_sizes,
@@ -280,8 +307,6 @@ efficiency_results.to_csv(result_path_efficiency, index=False)
 # Save summary for comparison with other approaches
 summary_results = {
     'approach': 'TD_features_only',
-    'mean_training_time_s': np.mean(training_times),
-    'std_training_time_s': np.std(training_times),
     'mean_model_size_KB': np.mean(model_sizes),
     'std_model_size_KB': np.std(model_sizes),
     'mean_deployment_size_KB': np.mean(deployment_sizes),

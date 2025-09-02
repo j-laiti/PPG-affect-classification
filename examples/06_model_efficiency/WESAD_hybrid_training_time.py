@@ -10,9 +10,9 @@ import time
 import glob
 
 # Add path for preprocessing functions
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from preprocessing.feature_extraction import get_ppg_features
-from preprocessing.filters import bandpass_filter, moving_average_filter
+sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+from preprocessing.feature_extraction import *
+from preprocessing.filters import *
 
 #%%
 class Simple1DCNNFeatures(nn.Module):
@@ -101,7 +101,7 @@ def prepare_training_data_for_cnn(subject_data_list, window_samples, step_sample
 
 def train_global_cnn(training_subjects, device, epochs=30):
     """Train CNN globally on fixed set of subjects"""
-    DATA_PATH = '../data/WESAD_BVP_extracted/'
+    DATA_PATH = '../../data/WESAD_BVP_extracted/'
     WINDOW_SAMPLES = 120 * 64  # 120s at 64Hz
     STEP_SAMPLES = 30 * 64     # 30s step
     
@@ -143,7 +143,7 @@ def train_global_cnn(training_subjects, device, epochs=30):
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
     
-    # Training loop (simplified for 1 epoch)
+    # Training loop
     for epoch in range(epochs):
         model.train()
         for batch_X, batch_y in train_loader:
@@ -177,7 +177,7 @@ def train_global_cnn(training_subjects, device, epochs=30):
 
 def extract_features_for_subject(subject_id, trained_model, device):
     """Extract hybrid features for one subject using pre-trained CNN"""
-    DATA_PATH = '../data/WESAD_BVP_extracted/'
+    DATA_PATH = '../../data/WESAD_BVP_extracted/'
     WINDOW_SAMPLES = 120 * 64
     STEP_SAMPLES = 30 * 64
     
@@ -199,6 +199,9 @@ def extract_features_for_subject(subject_id, trained_model, device):
     
     trained_model.eval()
     
+    # measure feature extraction starting here
+    start_time_feat_extraction = time.perf_counter()
+    
     for label_value in [0.0, 1.0]:
         label_data = df[df['label'] == label_value]['BVP'].values
         
@@ -219,14 +222,21 @@ def extract_features_for_subject(subject_id, trained_model, device):
                     cnn_features = trained_model.extract_features_only(window_tensor)
                     cnn_features_np = cnn_features.cpu().numpy().flatten()
                 
+                clean_ppg_values = window[~np.isnan(window)]
+                ppg_standardized = standardize(clean_ppg_values)
+
                 # Time-domain feature extraction
                 bp_bvp = bandpass_filter(window, 0.2, 10, 64, order=2)
                 smoothed_signal = moving_average_filter(bp_bvp, window_size=5)
+
+                segment_stds, std_ths = simple_dynamic_threshold(smoothed_signal, 64, 95, window_size= 3)
+                sim_clean_signal, clean_signal_indices = simple_noise_elimination(smoothed_signal, 64, std_ths)
+                sim_final_clean_signal = moving_average_filter(sim_clean_signal, window_size=3)
                 
-                td_stats = get_ppg_features(ppg_seg=smoothed_signal.tolist(), 
+                td_stats = get_ppg_features(ppg_seg=sim_final_clean_signal.tolist(), 
                                           fs=64, 
                                           label=int(label_value), 
-                                          calc_sq=False)
+                                          calc_sq=True)
                 
                 # Store if successful
                 if td_stats and len(cnn_features_np) == 32:
@@ -276,8 +286,11 @@ def extract_features_for_subject(subject_id, trained_model, device):
         cnn_df,
         td_df
     ], axis=1)
-    
-    return result_df
+
+    end_time_feat_extraction = time.perf_counter()
+    feat_extraction_duration = end_time_feat_extraction - start_time_feat_extraction
+
+    return result_df, feat_extraction_duration
 
 def run_global_hybrid_extraction_with_timing():
     """Main function with complete timing measurement"""
@@ -285,7 +298,7 @@ def run_global_hybrid_extraction_with_timing():
     # Configuration
     cnn_training_subjects = [2, 3, 4, 5, 6]  # Fixed CNN training subjects
     all_subjects = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17]  # All subjects for feature extraction
-    output_file = 'data/all_subjects_WESAD_hybrid_features_timing.csv'
+    output_file = 'all_subjects_WESAD_hybrid_features_timing.csv'
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
@@ -311,15 +324,16 @@ def run_global_hybrid_extraction_with_timing():
     
     # Step 2: Extract features for all subjects
     print(f"\n2. Extracting features for all subjects using trained CNN")
-    feature_extraction_start = time.perf_counter()
     
     all_dataframes = []
     successful_subjects = []
     failed_subjects = []
-    
+    feature_extraction_durations = []
+
     for subject_id in all_subjects:
         try:
-            subject_df = extract_features_for_subject(subject_id, trained_model, device)
+            subject_df, feature_extraction_duration = extract_features_for_subject(subject_id, trained_model, device)
+            feature_extraction_durations.append(feature_extraction_duration)
             if subject_df is not None:
                 all_dataframes.append(subject_df)
                 successful_subjects.append(subject_id)
@@ -330,8 +344,8 @@ def run_global_hybrid_extraction_with_timing():
         except Exception as e:
             failed_subjects.append(subject_id)
             print(f"   S{subject_id}: ERROR - {e}")
-    
-    feature_extraction_time = time.perf_counter() - feature_extraction_start
+
+    feature_extraction_time = sum(feature_extraction_durations)
     print(f"Feature extraction completed in {feature_extraction_time:.2f} seconds")
     
     # Step 3: Combine all dataframes
@@ -394,12 +408,14 @@ def run_global_hybrid_extraction_with_timing():
         'final_dataset_shape': combined_df.shape
     }
 
-# Run the full pipeline
+#%% Run the full pipeline
 if __name__ == "__main__":
     results = run_global_hybrid_extraction_with_timing()
     if results:
         print(f"\nPipeline completed successfully!")
         print(f"Total processing time: {results['total_time']:.2f} seconds")
+        results_df = pd.DataFrame([results])
+        results_df.to_csv('WESAD_hybrid_extraction_timing.csv', index=False)
     else:
         print(f"\nPipeline failed!")
 # %%

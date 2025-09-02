@@ -1,0 +1,5 @@
+Methods,WESAD,,,Aktives,,,Wellby,,
+,Training Time (s),Average Inference Time (s),Model Size (KB),Training Time (s),Average Inference Time (s),Model Size (KB),Training Time (s),Average Inference Time (s),Model Size (KB)
+Proposed Pipeline,3.906,0.003,12.612,0.319,0.001,10.35,0.099,0.001,3.344
+Hybrid Baseline,21.616,0.007,117.561,3.215,0.003,39.603,2.074,0.003,11.62
+CNN Baseline,6184.828,0.046,6791.88,303.347,0.016,6791.9,42.021,0.011,6791.82

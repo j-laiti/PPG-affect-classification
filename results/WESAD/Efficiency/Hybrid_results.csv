@@ -1,2 +1,0 @@
-approach,mean_training_time_s,std_training_time_s,mean_model_size_KB,std_model_size_KB,mean_deployment_size_KB,std_deployment_size_KB,mean_inference_time_ms,std_inference_time_ms
-hybrid_cnn_td,0.03229559262593587,0.01834459935943267,117.56087239583333,4.752715110006456,118.99348958333333,4.752715110006456,12.466690392660288,4.587491140262775

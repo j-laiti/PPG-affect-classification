@@ -12,9 +12,12 @@ import pickle
 import math
 import numpy as np
 import pandas as pd
+import time
 
 #%%
+import sys
 
+sys.path.append('../')
 from scipy.interpolate import UnivariateSpline
 from preprocessing.feature_extraction import *
 from preprocessing.filters import *
@@ -271,14 +274,18 @@ for n in NOISE:
     
     if not os.path.exists(savePath + subject_feature_path):
         os.makedirs(savePath + subject_feature_path)
-    
-        
+
+    start_time = time.time()
     for patient in subject_ids:
         print(f'Processing data for S{patient}...')
         window_len = make_patient_data(patient, BP)
         total_window_len += window_len
+    end_time = time.time()
+    print(f"Processing time for patients: {end_time - start_time} seconds")
 
     combine_files(subject_ids)
     print('total_Window_len: ',total_window_len)
     print('Processing complete.', n)
     total_window_len = 0
+
+# %%

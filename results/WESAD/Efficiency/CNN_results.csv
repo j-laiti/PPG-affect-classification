@@ -1,2 +1,0 @@
-model,test_subject,training_time_s,model_size_KB,avg_inference_time_ms,std_inference_time_ms,total_params
-Dilated CNN (WESAD),S2,615.8501076698303,6791.8837890625,6.736767292022705,0.17366852607691013,1732994

@@ -152,10 +152,10 @@ print(f"  Cohort: {inference_sample_metadata['cohort']}")
 print(f"  Label: {inference_sample_metadata['label']}")
 
 # Import your feature extraction functions
-sys.path.append('../../src/')
+sys.path.append('../..')
 
-from preprocessing.feature_extraction import get_ppg_features
-from preprocessing.filters import bandpass_filter, moving_average_filter, standardize
+from preprocessing.feature_extraction import *
+from preprocessing.filters import *
 
 # Modified feature extraction function
 def extract_td_features_for_inference_sample(sample_metadata, fs=64):
@@ -197,6 +197,7 @@ def extract_td_features_for_inference_sample(sample_metadata, fs=64):
             return None
         
         # ===== TIME-DOMAIN FEATURE EXTRACTION =====
+        td_extraction_time_start = time.perf_counter()
         # Process for TD features (same as before)
         clean_ppg_values = raw_ppg_values[~np.isnan(raw_ppg_values)]
         ppg_standardized = standardize(clean_ppg_values)
@@ -204,14 +205,18 @@ def extract_td_features_for_inference_sample(sample_metadata, fs=64):
         # Apply filtering for TD features
         bp_bvp = bandpass_filter(ppg_standardized, 0.5, 10, fs, order=2)
         smoothed_signal = moving_average_filter(bp_bvp, window_size=5)
+
+        segment_stds, std_ths = simple_dynamic_threshold(smoothed_signal, 64, 95, window_size= 3)
+        sim_clean_signal, clean_signal_indices = simple_noise_elimination(smoothed_signal, 64, std_ths)
+        sim_final_clean_signal = moving_average_filter(sim_clean_signal, window_size=3)
         
         # Extract TD features
-        td_stats = get_ppg_features(ppg_seg=smoothed_signal.tolist(), 
+        td_stats = get_ppg_features(ppg_seg=sim_final_clean_signal.tolist(), 
                                   fs=fs, 
                                   label=label, 
                                   calc_sq=True)
         
-        print(td_stats)
+        # print(td_stats)
 
         # Exclude the pnn50 and pnn20 from the TD features
         if td_stats is not None:
@@ -221,6 +226,9 @@ def extract_td_features_for_inference_sample(sample_metadata, fs=64):
 
         if td_stats is None:
             return None
+        
+        td_extraction_time_end = time.perf_counter()
+        td_extraction_time = td_extraction_time_end - td_extraction_time_start
             
         # Convert TD stats to list
         if isinstance(td_stats, dict):
@@ -229,7 +237,7 @@ def extract_td_features_for_inference_sample(sample_metadata, fs=64):
             td_features = td_stats
         
         # Combine CNN and TD features
-        return td_features
+        return td_features, td_extraction_time
         
     except Exception as e:
         print(f"Error extracting hybrid features: {e}")
@@ -237,49 +245,44 @@ def extract_td_features_for_inference_sample(sample_metadata, fs=64):
 
 #%% Test and measure complete hybrid inference
 print("Testing proposed pipeline for inference sample...")
-test_td_features = extract_td_features_for_inference_sample(inference_sample_metadata)
-
-if test_td_features is None:
-    print("❌ Could not extract TD features for inference sample")
-else:
-    print(f"✓ Successfully extracted {len(test_td_features)} TD features")
-    print(f"  Actual total features: {len(test_td_features)}")
     
-    # Now measure complete TD inference time
-    n_inference_tests = 100
-    inference_times = []
-    
-    print(f"Running {n_inference_tests} TD inference tests...")
-    
-    for i in range(n_inference_tests):
-        start_time = time.time()
+# Now measure complete TD inference time
+n_inference_tests = 10
+inference_times = []
 
-        # Step 1: Extract TD features from raw PPG
-        td_features = extract_td_features_for_inference_sample(
-            inference_sample_metadata
-        )
+print(f"Running {n_inference_tests} TD inference tests...")
 
-        if td_features is not None:
-            
-            # Step 3: Combine all features (CNN + TD)
-            feature_vector = np.array(td_features).reshape(1, -1)
+for i in range(n_inference_tests):
 
-            # Step 4: Scale features using the same scaler from training
-            feature_vector_scaled = scaler.transform(feature_vector)
-            
-            # Step 5: Make prediction
-            prediction = final_model.predict(feature_vector_scaled)
+    # Step 1: Extract TD features from raw PPG
+    td_features, td_extraction_time = extract_td_features_for_inference_sample(
+        inference_sample_metadata
+    )
 
-        end_time = time.time()
-        inference_times.append((end_time - start_time) * 1000)  # Convert to milliseconds
-    
-    avg_inference_time = np.mean(inference_times)
-    std_inference_time = np.std(inference_times)
-    
-    print(f"✓ Complete hybrid inference measurement completed!")
-    print(f"  Average complete inference time: {avg_inference_time:.3f}ms")
-    print(f"  Standard deviation: {std_inference_time:.3f}ms")
-    print(f"  Final prediction: {prediction[0]} (actual: {inference_sample_metadata['label']})")
+    feature_prediction_time_start = time.perf_counter()
+
+    if td_features is not None:
+        
+        # Step 3: Combine all features (CNN + TD)
+        feature_vector = np.array(td_features).reshape(1, -1)
+
+        # Step 4: Scale features using the same scaler from training
+        feature_vector_scaled = scaler.transform(feature_vector)
+        
+        # Step 5: Make prediction
+        prediction = final_model.predict(feature_vector_scaled)
+
+    feature_prediction_time_end = time.perf_counter()
+    feature_prediction_time = feature_prediction_time_end - feature_prediction_time_start
+    inference_times.append((td_extraction_time - feature_prediction_time) * 1000)  # Convert to milliseconds
+
+avg_inference_time = np.mean(inference_times)
+std_inference_time = np.std(inference_times)
+
+print(f"✓ Complete hybrid inference measurement completed!")
+print(f"  Average complete inference time: {avg_inference_time:.3f}ms")
+print(f"  Standard deviation: {std_inference_time:.3f}ms")
+print(f"  Final prediction: {prediction[0]} (actual: {inference_sample_metadata['label']})")
 
 # %% Save results
 
@@ -291,9 +294,8 @@ results = {
     "std_inference_time_ms": std_inference_time,
 }
 
-Aktives_results_path = '../../results/Aktives/Efficiency'
 
-output_csv_path = f"{Aktives_results_path}/TD_results.csv"
+output_csv_path = "AKTIVES_TD_results.csv"
 
 save_df = pd.DataFrame([results])
 save_df.to_csv(output_csv_path, index=False)

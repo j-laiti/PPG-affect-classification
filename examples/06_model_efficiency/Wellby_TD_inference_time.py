@@ -14,7 +14,6 @@ import sys
 # Configuration
 # File paths
 DATA_PATH = '../../data/Wellby/Wellby_all_subjects_features.csv'
-RESULTS_DIR = '../../results/Wellby/Efficiency/'
 
 label = 'stress_binary'
 feats = ['HR_mean','HR_std','meanNN','SDNN','medianNN','RMSSD','pNN20','pNN50','PSS','PSQI','EPOCH','SQI']
@@ -136,7 +135,7 @@ print("MEASURING INFERENCE TIME (Pre-extracted Features → Prediction)")
 print("="*50)
 
 # import processing functions
-sys.path.append('../../src/')
+sys.path.append('../..')
 
 from preprocessing.feature_extraction import get_ppg_features
 from preprocessing.filters import bandpass_filter, moving_average_filter, standardize, simple_dynamic_threshold, simple_noise_elimination
@@ -230,9 +229,8 @@ if test_data is not None:
     }
 
     # Create results directory if it doesn't exist
-    os.makedirs(RESULTS_DIR, exist_ok=True)
     
-    output_csv_path = f"{RESULTS_DIR}/TD_results.csv"
+    output_csv_path = "Wellby_TD_inference.csv"
     
     save_df = pd.DataFrame([results])
     save_df.to_csv(output_csv_path, index=False)

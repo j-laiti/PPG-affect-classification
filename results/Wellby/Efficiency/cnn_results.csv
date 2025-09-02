@@ -1,2 +1,0 @@
-model,task,total_training_time_s,avg_training_time_per_fold_s,model_size_KB,avg_inference_time_ms,std_inference_time_ms,total_parameters
-End-to-End CNN,stress,11.72397756576538,3.9079925219217935,6791.821289,1.7070293426513672,0.13852718967326352,1732994

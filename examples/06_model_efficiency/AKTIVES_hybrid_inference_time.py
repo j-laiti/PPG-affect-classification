@@ -14,7 +14,7 @@ from sklearn import svm
 from sklearn.metrics import roc_auc_score, accuracy_score, f1_score  # Added missing imports
 
 # Load hybrid features data
-data = pd.read_csv('../../data/AKTIVES_hybrid_features/all_subjects_AKTIVES_hybrid_features.csv')
+data = pd.read_csv('../../data/AKTIVES_hybrid_features/all_subjects_AKTIVES_hybrid_features_timing.csv')
 
 print(f"Dataset shape: {data.shape}")
 print(f"Unique participants: {data['participant'].nunique()}")
@@ -38,6 +38,61 @@ X = data[all_features].values
 y = data['label'].values
 
 print(f"Total features: {X.shape[1]}")
+
+#%% Check for and handle NaN values
+print("\n" + "="*50)
+print("CHECKING FOR NaN VALUES")
+print("="*50)
+
+# Check for NaN values in the feature matrix
+print(f"Original dataset shape: {X.shape}")
+print(f"NaN values per column:")
+
+nan_counts = pd.DataFrame(data[all_features]).isnull().sum()
+nan_columns = nan_counts[nan_counts > 0]
+
+if len(nan_columns) > 0:
+    print("Columns with NaN values:")
+    for col, count in nan_columns.items():
+        percentage = (count / len(data)) * 100
+        print(f"  {col}: {count} NaNs ({percentage:.1f}%)")
+    
+    # Check total rows with any NaN
+    rows_with_nan = pd.DataFrame(data[all_features]).isnull().any(axis=1).sum()
+    print(f"\nTotal rows with any NaN values: {rows_with_nan} ({(rows_with_nan/len(data))*100:.1f}%)")
+    
+    # Option 1: Remove rows with any NaN values (recommended for small datasets)
+    print(f"\nHandling NaN values by removing rows with any NaN...")
+    
+    # Create mask for rows without NaN
+    valid_rows_mask = ~pd.DataFrame(data[all_features]).isnull().any(axis=1)
+    
+    # Apply mask to data
+    X_clean = X[valid_rows_mask]
+    y_clean = y[valid_rows_mask]
+    data_clean = data[valid_rows_mask].reset_index(drop=True)
+    
+    print(f"After removing NaN rows:")
+    print(f"  Clean dataset shape: {X_clean.shape}")
+    print(f"  Removed {len(X) - len(X_clean)} rows")
+    print(f"  Label distribution after cleaning: {np.bincount(y_clean)}")
+    
+    # Update variables
+    X = X_clean
+    y = y_clean
+    data = data_clean
+    
+    # Verify no NaN values remain
+    remaining_nans = np.isnan(X).sum()
+    print(f"  Remaining NaN values in X: {remaining_nans}")
+    
+    if remaining_nans > 0:
+        print("  ERROR: NaN values still present after cleaning!")
+        
+else:
+    print("No NaN values found in the dataset.")
+
+print(f"Final dataset shape for training: {X.shape}")
 
 #%% Prepare data splits - reserve one sample for inference testing
 np.random.seed(42)
@@ -162,10 +217,10 @@ print(f"  Cohort: {inference_sample_metadata['cohort']}")
 print(f"  Label: {inference_sample_metadata['label']}")
 
 # Import your feature extraction functions
-sys.path.append('../../src/')
+sys.path.append('../..')
 
-from preprocessing.feature_extraction import get_ppg_features
-from preprocessing.filters import bandpass_filter, moving_average_filter, standardize
+from preprocessing.feature_extraction import *
+from preprocessing.filters import *
 
 #%% Import CNN model classes (add this near the top)
 import torch
@@ -243,14 +298,14 @@ try:
     cnn_model.load_state_dict(torch.load('temp_best_aktives_cnn.pth', map_location=device))
     cnn_model.eval()  # Set to evaluation mode
     
-    print("✓ CNN model loaded successfully")
+    print("CNN model loaded successfully")
     
     # Test that it works by checking the number of parameters
     total_params = sum(p.numel() for p in cnn_model.parameters())
     print(f"  Total parameters: {total_params:,}")
     
 except Exception as e:
-    print(f"❌ Could not load CNN model: {e}")
+    print(f"Could not load CNN model: {e}")
     cnn_model = None
 
 # Modified feature extraction function with CNN
@@ -292,6 +347,8 @@ def extract_hybrid_features_for_inference_sample(sample_metadata, cnn_model, dev
         if len(raw_ppg_values) < fs * 10:  # Less than 10 seconds
             return None
         
+        start_time = time.perf_counter()
+        
         # ===== CNN FEATURE EXTRACTION =====
         # Minimal preprocessing for CNN (same as your existing approach)
         clean_ppg_values = raw_ppg_values[~np.isnan(raw_ppg_values)]
@@ -321,6 +378,7 @@ def extract_hybrid_features_for_inference_sample(sample_metadata, cnn_model, dev
         else:
             # If no CNN model, create dummy features (zeros)
             cnn_features_np = np.zeros(32)
+            print("no CNN features!")
         
         # ===== TIME-DOMAIN FEATURE EXTRACTION =====
         # Process for TD features (same as before)
@@ -330,12 +388,16 @@ def extract_hybrid_features_for_inference_sample(sample_metadata, cnn_model, dev
         # Apply filtering for TD features
         bp_bvp = bandpass_filter(ppg_standardized, 0.5, 10, fs, order=2)
         smoothed_signal = moving_average_filter(bp_bvp, window_size=5)
+
+        segment_stds, std_ths = simple_dynamic_threshold(smoothed_signal, 64, 95, window_size= 3)
+        sim_clean_signal, clean_signal_indices = simple_noise_elimination(smoothed_signal, 64, std_ths)
+        sim_final_clean_signal = moving_average_filter(sim_clean_signal, window_size=3)
         
         # Extract TD features
-        td_stats = get_ppg_features(ppg_seg=smoothed_signal.tolist(), 
+        td_stats = get_ppg_features(ppg_seg=sim_final_clean_signal.tolist(), 
                                   fs=fs, 
                                   label=label, 
-                                  calc_sq=False)
+                                  calc_sq=True)
         
         # Exclude the pnn50 and pnn20 from the TD features
         if td_stats is not None:
@@ -343,7 +405,9 @@ def extract_hybrid_features_for_inference_sample(sample_metadata, cnn_model, dev
             td_stats.pop('pNN20', None)
             td_stats.pop('label', None)
 
-            
+        end_time = time.perf_counter()
+        inference_time = end_time - start_time
+
         # Convert TD stats to list
         if isinstance(td_stats, dict):
             td_features = list(td_stats.values())
@@ -351,61 +415,49 @@ def extract_hybrid_features_for_inference_sample(sample_metadata, cnn_model, dev
             td_features = td_stats
         
         # Combine CNN and TD features
-        return list(cnn_features_np) + td_features
+        return list(cnn_features_np) + td_features, inference_time
         
     except Exception as e:
         print(f"Error extracting hybrid features: {e}")
         return None
 
 #%% Test and measure complete hybrid inference
-print("Testing hybrid feature extraction for inference sample...")
-test_hybrid_features = extract_hybrid_features_for_inference_sample(
-    inference_sample_metadata, cnn_model, device
-)
+    
+# Now measure complete hybrid inference time
+n_inference_tests = 100
+inference_times = []
 
-if test_hybrid_features is None:
-    print("❌ Could not extract hybrid features for inference sample")
-else:
-    print(f"✓ Successfully extracted {len(test_hybrid_features)} hybrid features")
-    print(f"  Expected CNN features: 32")
-    print(f"  Actual total features: {len(test_hybrid_features)}")
+print(f"Running {n_inference_tests} hybrid inference tests...")
+
+for i in range(n_inference_tests):
     
-    # Now measure complete hybrid inference time
-    n_inference_tests = 100
-    inference_times = []
-    
-    print(f"Running {n_inference_tests} hybrid inference tests...")
-    
-    for i in range(n_inference_tests):
-        start_time = time.perf_counter()
+    # Step 1: Extract hybrid features (CNN + TD) from raw PPG
+    hybrid_features, feature_extraction_time = extract_hybrid_features_for_inference_sample(
+        inference_sample_metadata, cnn_model, device
+    )
+
+    model_prediction_start_time = time.perf_counter()
+
+    if hybrid_features is not None:
         
-        # Step 1: Extract hybrid features (CNN + TD) from raw PPG
-        hybrid_features = extract_hybrid_features_for_inference_sample(
-            inference_sample_metadata, cnn_model, device
-        )
+        # Step 3: Combine all features (CNN + TD)
+        combined_features = hybrid_features
+        feature_vector = np.array(combined_features).reshape(1, -1)
         
-        if hybrid_features is not None:
-            
-            # Step 3: Combine all features (CNN + TD)
-            combined_features = hybrid_features
-            feature_vector = np.array(combined_features).reshape(1, -1)
-            
-            # Step 4: Scale features using the same scaler from training
-            feature_vector_scaled = scaler.transform(feature_vector)
-            
-            # Step 5: Make prediction
-            prediction = final_model.predict(feature_vector_scaled)
-            
-        end_time = time.perf_counter()
-        inference_times.append((end_time - start_time) * 1000)  # Convert to milliseconds
-    
-    avg_inference_time = np.mean(inference_times)
-    std_inference_time = np.std(inference_times)
-    
-    print(f"✓ Complete hybrid inference measurement completed!")
-    print(f"  Average complete inference time: {avg_inference_time:.3f}ms")
-    print(f"  Standard deviation: {std_inference_time:.3f}ms")
-    print(f"  Final prediction: {prediction[0]} (actual: {inference_sample_metadata['label']})")
+        # Step 4: Scale features using the same scaler from training
+        feature_vector_scaled = scaler.transform(feature_vector)
+        
+        # Step 5: Make prediction
+        prediction = final_model.predict(feature_vector_scaled)
+        
+    model_prediction_end_time = time.perf_counter()
+    model_prediction_time = model_prediction_end_time - model_prediction_start_time
+    inference_times.append((feature_extraction_time + model_prediction_time) * 1000)  # Convert to milliseconds
+
+avg_inference_time = np.mean(inference_times)
+std_inference_time = np.std(inference_times)
+
+print(f"Complete hybrid inference measurement completed")
 
 # %% Save results
 
@@ -417,9 +469,8 @@ results = {
     "std_inference_time_ms": std_inference_time,
 }
 
-Aktives_results_path = '../../results/Aktives/Efficiency'
 
-output_csv_path = f"{Aktives_results_path}/hybrid_results.csv"
+output_csv_path = "AKTIVES_hybrid_inference.csv"
 
 save_df = pd.DataFrame([results])
 save_df.to_csv(output_csv_path, index=False)

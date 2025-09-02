@@ -1,5 +1,5 @@
 # Code to extract DL and time-domain features from the AKTIVES dataset
-# Adapted from WESAD hybrid approach for AKTIVES structure
+# Adapted from WESAD hybrid approach for AKTIVES structure WITH COMPREHENSIVE TIMING
 
 #%% imports
 import numpy as np
@@ -9,14 +9,15 @@ import torch.nn as nn
 import torch.optim as optim
 import sys
 import os
+import time
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 # Add path for preprocessing functions
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 from preprocessing.feature_extraction import get_ppg_features
-from preprocessing.filters import bandpass_filter, moving_average_filter, standardize
+from preprocessing.filters import *
 from preprocessing.peak_detection import threshold_peakdetection
 
 class TrainableCNNFeatureExtractor(nn.Module):
@@ -204,7 +205,7 @@ def load_ppg_for_window(row, target_length=1920, fs=64):
 
 def prepare_aktives_training_data(windows_df, test_participants, target_length=1920):
     """
-    Prepare training data for CNN from AKTIVES windows
+    Prepare training data for CNN from AKTIVES windows WITH TIMING
     
     Args:
         windows_df: All analysis windows
@@ -216,6 +217,9 @@ def prepare_aktives_training_data(windows_df, test_participants, target_length=1
         y_train: Training labels
     """
     print("Preparing training data for CNN...")
+    
+    # ===== TIMING: Data preparation start =====
+    prep_start_time = time.perf_counter()
     
     # Filter out test participants
     train_windows = windows_df[~windows_df['Participant'].str.split('_').str[0].isin(test_participants)]
@@ -233,18 +237,23 @@ def prepare_aktives_training_data(windows_df, test_participants, target_length=1
             X_train.append(ppg_signal)
             y_train.append(int(row['Label']))  # Assuming Label is 0 or 1
     
+    prep_time = time.perf_counter() - prep_start_time
+    print(f"Data preparation completed in {prep_time:.2f} seconds")
     print(f"Successfully loaded {len(X_train)} training windows")
     print(f"Label distribution: {np.bincount(y_train)}")
     
     return np.array(X_train), np.array(y_train)
 
-def train_aktives_cnn(X_train, y_train, device, epochs=50, validation_split=0.2):
+def train_aktives_cnn(X_train, y_train, device, epochs=30, validation_split=0.2):
     """
-    Train CNN for AKTIVES stress detection
+    Train CNN for AKTIVES stress detection WITH TIMING
     """
     print("Training CNN for AKTIVES stress detection...")
     print(f"Training data: {len(X_train)} windows")
     print(f"Label distribution: {np.bincount(y_train)}")
+    
+    # ===== TIMING: CNN training start =====
+    training_start_time = time.perf_counter()
     
     # Convert to tensors
     X_tensor = torch.FloatTensor(X_train).unsqueeze(1)  # Add channel dimension
@@ -271,7 +280,7 @@ def train_aktives_cnn(X_train, y_train, device, epochs=50, validation_split=0.2)
     
     best_val_acc = 0.0
     patience_counter = 0
-    patience = 15  # More patience for smaller dataset
+    patience = 29  # Run all 30 epochs for training test
     
     # Training loop
     for epoch in range(epochs):
@@ -334,9 +343,11 @@ def train_aktives_cnn(X_train, y_train, device, epochs=50, validation_split=0.2)
     
     # Load best model
     model.load_state_dict(torch.load('temp_best_aktives_cnn.pth'))
-    print(f'CNN training completed. Best validation accuracy: {best_val_acc:.1f}%')
     
-    return model
+    training_time = time.perf_counter() - training_start_time
+    print(f'CNN training completed in {training_time:.2f} seconds. Best validation accuracy: {best_val_acc:.1f}%')
+    
+    return model, training_time
 
 def extract_aktives_features_for_window(row, trained_model, device, target_length=1920, fs=64):
     """
@@ -359,6 +370,17 @@ def extract_aktives_features_for_window(row, trained_model, device, target_lengt
         if raw_ppg_signal is None:
             return None
         
+        participant_cell = row["Participant"]
+        participant = participant_cell.split("_")[0]
+        game = participant_cell.split("_")[1]
+        interval_start = row["Interval_Start"]
+        interval_end = row["Interval_End"]
+        cohort = row["cohort"]
+        label = int(row['Label'])
+
+        # measure feature extraction starting here
+        start_time_feat_extraction = time.perf_counter()
+        
         # ===== CNN FEATURE EXTRACTION =====
         # Normalize for CNN (following WESAD approach)
         cnn_signal = (raw_ppg_signal - np.mean(raw_ppg_signal)) / (np.std(raw_ppg_signal) + 1e-8)
@@ -370,44 +392,21 @@ def extract_aktives_features_for_window(row, trained_model, device, target_lengt
             cnn_features_np = cnn_features.cpu().numpy().flatten()
         
         # ===== TIME-DOMAIN FEATURE EXTRACTION =====
-        # Load and process signal for TD features (following AKTIVES approach)
-        participant_cell = row["Participant"]
-        participant = participant_cell.split("_")[0]
-        game = participant_cell.split("_")[1]
-        interval_start = row["Interval_Start"]
-        interval_end = row["Interval_End"]
-        cohort = row["cohort"]
-        label = int(row['Label'])
-        
-        # Map cohort names to folder names
-        cohort_folder_map = {
-            'dyslexia': 'Dyslexia',
-            'ID': 'Intellectual Disabilities',
-            'OBPI': 'Obstetric Brachial Plexus Injuries',
-            'TD': 'Typically Developed'
-        }
-        
-        cohort_folder = cohort_folder_map[cohort]
-        ppg_file_path = f"../../data/Aktives/PPG/{cohort_folder}/{participant}/{game}/BVP.csv"
-        
-        ppg_data = pd.read_csv(ppg_file_path)
-        ppg_data["Time"] = ppg_data.index / fs
-        ppg_data['values'] = ppg_data['values'].astype(str).str.replace(',', '.', regex=False).astype(float)
-        
-        ppg_interval = ppg_data[(ppg_data['Time'] >= interval_start) & 
-                               (ppg_data['Time'] <= interval_end)]
-        raw_ppg_values = ppg_interval['values'].values
         
         # Process for TD features (following AKTIVES processing + WESAD filtering)
-        clean_ppg_values = raw_ppg_values[~np.isnan(raw_ppg_values)]
+        clean_ppg_values = raw_ppg_signal[~np.isnan(raw_ppg_signal)]
         ppg_standardized = standardize(clean_ppg_values)
         
         # Apply filtering for TD features (following WESAD approach)
         bp_bvp = bandpass_filter(ppg_standardized, 0.5, 10, fs, order=2)  # Using WESAD frequencies
         smoothed_signal = moving_average_filter(bp_bvp, window_size=5)
         
+        segment_stds, std_ths = simple_dynamic_threshold(smoothed_signal, 64, 95, window_size= 3)
+        sim_clean_signal, clean_signal_indices = simple_noise_elimination(smoothed_signal, 64, std_ths)
+        sim_final_clean_signal = moving_average_filter(sim_clean_signal, window_size=3)
+        
         # Extract TD features
-        td_stats = get_ppg_features(ppg_seg=smoothed_signal.tolist(), 
+        td_stats = get_ppg_features(ppg_seg=sim_final_clean_signal.tolist(), 
                                   fs=fs, 
                                   label=label, 
                                   calc_sq=True)
@@ -438,28 +437,46 @@ def extract_aktives_features_for_window(row, trained_model, device, target_lengt
                        'mean_nn', 'mean_sd', 'median_nn', 'pnn20', 'pnn50']
             for i, feat in enumerate(td_stats[:len(td_names)]):
                 features_dict[td_names[i]] = feat
-        
-        return features_dict
-        
+
+        end_time_feat_extraction = time.perf_counter()
+        feat_extraction_duration = end_time_feat_extraction - start_time_feat_extraction
+
+        return features_dict, feat_extraction_duration
+
     except Exception as e:
         print(f"Error extracting features for window: {str(e)}")
         return None
 
-def extract_all_aktives_hybrid_features():
+def extract_all_aktives_hybrid_features_with_timing():
     """
-    Main function to extract hybrid features from all AKTIVES data
+    Main function to extract hybrid features from all AKTIVES data WITH COMPREHENSIVE TIMING
     """
     print("="*70)
-    print("AKTIVES HYBRID FEATURE EXTRACTION")
+    print("AKTIVES HYBRID FEATURE EXTRACTION WITH COMPREHENSIVE TIMING")
     print("="*70)
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
+    # ===== TIMING STARTS HERE =====
+    total_start_time = time.perf_counter()
+    
     # Step 1: Load all analysis windows
-    all_windows = load_all_aktives_windows()
+    print("\n1. Loading all analysis windows...")
+    data_loading_start = time.perf_counter()
+    
+    try:
+        all_windows = load_all_aktives_windows()
+        data_loading_time = time.perf_counter() - data_loading_start
+        print(f"Data loading completed in {data_loading_time:.2f} seconds")
+    except Exception as e:
+        print(f"Error loading analysis windows: {e}")
+        return None
     
     # Step 2: Create 70/30 participant split
+    print(f"\n2. Creating participant split...")
+    split_start = time.perf_counter()
+    
     all_participants = all_windows['Participant'].str.split('_').str[0].unique()
     print(f"Total unique participants: {len(all_participants)}")
     
@@ -468,10 +485,13 @@ def extract_all_aktives_hybrid_features():
         all_participants, test_size=0.3, random_state=42
     )
     
+    split_time = time.perf_counter() - split_start
+    print(f"Participant split completed in {split_time:.3f} seconds")
     print(f"Training participants ({len(train_participants)}): {sorted(train_participants)}")
     print(f"Test participants ({len(test_participants)}): {sorted(test_participants)}")
     
     # Step 3: Prepare training data
+    print(f"\n3. Preparing training data...")
     X_train, y_train = prepare_aktives_training_data(all_windows, test_participants)
     
     if len(X_train) < 50:
@@ -479,23 +499,28 @@ def extract_all_aktives_hybrid_features():
         return None
     
     # Step 4: Train CNN
-    trained_model = train_aktives_cnn(X_train, y_train, device)
+    print(f"\n4. Training CNN...")
+    trained_model, cnn_training_time = train_aktives_cnn(X_train, y_train, device)
     
     # Step 5: Extract features for all windows
-    print("\nExtracting hybrid features for all windows...")
+    print(f"\n5. Extracting hybrid features for all windows...")
+    
     trained_model.eval()
     
     all_features = []
     failed_windows = 0
-    
+    feature_extraction_durations = []
+
     for idx, row in tqdm(all_windows.iterrows(), total=len(all_windows), desc="Extracting features"):
-        features = extract_aktives_features_for_window(row, trained_model, device)
-        
+        features, feature_extraction_duration = extract_aktives_features_for_window(row, trained_model, device)
+        feature_extraction_durations.append(feature_extraction_duration)
         if features is not None:
             all_features.append(features)
         else:
             failed_windows += 1
-    
+
+    feature_extraction_time = sum(feature_extraction_durations)
+    print(f"Feature extraction completed in {feature_extraction_time:.2f} seconds")
     print(f"Successfully extracted features from {len(all_features)}/{len(all_windows)} windows")
     print(f"Failed windows: {failed_windows}")
     
@@ -504,6 +529,9 @@ def extract_all_aktives_hybrid_features():
         return None
     
     # Step 6: Create DataFrame and standardize features
+    print(f"\n6. Processing and standardizing features...")
+    processing_start = time.perf_counter()
+    
     features_df = pd.DataFrame(all_features)
     
     # Identify feature columns
@@ -521,23 +549,44 @@ def extract_all_aktives_hybrid_features():
     features_df[cnn_columns] = scaler_cnn.fit_transform(features_df[cnn_columns])
     features_df[td_columns] = scaler_td.fit_transform(features_df[td_columns])
     
+    processing_time = time.perf_counter() - processing_start
+    print(f"Feature processing completed in {processing_time:.2f} seconds")
+    
     # Step 7: Save results
+    print(f"\n7. Saving results...")
+    saving_start = time.perf_counter()
+    
     output_dir = "../../data/AKTIVES_hybrid_features/"
     os.makedirs(output_dir, exist_ok=True)
     
-    output_file = os.path.join(output_dir, "all_subjects_AKTIVES_hybrid_features.csv")
+    output_file = os.path.join(output_dir, "all_subjects_AKTIVES_hybrid_features_timing.csv")
     features_df.to_csv(output_file, index=False)
     
-    print(f"\nResults saved to: {output_file}")
+    saving_time = time.perf_counter() - saving_start
+    print(f"Results saved in {saving_time:.2f} seconds")
+    print(f"Output file: {output_file}")
     
-    # Summary statistics
+    # ===== TIMING ENDS HERE =====
+    total_time = time.perf_counter() - total_start_time
+    
+    # Final Summary (following WESAD format)
     print("\n" + "="*70)
-    print("EXTRACTION SUMMARY")
+    print("TIMING SUMMARY")
     print("="*70)
+    print(f"Data Loading Time:        {data_loading_time:.3f} seconds")
+    print(f"Participant Split Time:   {split_time:.3f} seconds")
+    print(f"CNN Training Time:        {cnn_training_time:.3f} seconds")
+    print(f"Feature Extraction Time:  {feature_extraction_time:.3f} seconds")
+    print(f"Feature Processing Time:  {processing_time:.3f} seconds")
+    print(f"Data Saving Time:         {saving_time:.3f} seconds")
+    print(f"TOTAL TIME:              {total_time:.3f} seconds")
+    
+    print("\nExtraction Summary:")
+    success_rate = len(all_features)/len(all_windows)*100
     print(f"Total windows processed: {len(all_windows)}")
     print(f"Successfully extracted: {len(all_features)}")
     print(f"Failed extractions: {failed_windows}")
-    print(f"Success rate: {len(all_features)/len(all_windows)*100:.1f}%")
+    print(f"Success rate: {success_rate:.1f}%")
     
     print(f"\nDataset characteristics:")
     print(f"  Total features: {len(cnn_columns) + len(td_columns)}")
@@ -561,18 +610,35 @@ def extract_all_aktives_hybrid_features():
         print(f"  Label {label}: {count} windows ({percentage:.1f}%)")
     
     # Clean up temporary files
-    if os.path.exists('temp_best_aktives_cnn.pth'):
-        os.remove('temp_best_aktives_cnn.pth')
     
-    return features_df
+    # Return timing information for comparison (following WESAD format)
+    return {
+        'total_time': total_time,
+        'data_loading_time': data_loading_time,
+        'participant_split_time': split_time,
+        'cnn_training_time': cnn_training_time,
+        'feature_extraction_time': feature_extraction_time,
+        'processing_time': processing_time,
+        'saving_time': saving_time,
+        'successful_windows': len(all_features),
+        'total_windows': len(all_windows),
+        'success_rate': success_rate,
+        'final_dataset_shape': features_df.shape
+    }
 
-# Run the extraction
+# Run the extraction with comprehensive timing
 if __name__ == "__main__":
-    print("Starting AKTIVES hybrid feature extraction...")
-    results = extract_all_aktives_hybrid_features()
+    print("Starting AKTIVES hybrid feature extraction with comprehensive timing...")
+    results = extract_all_aktives_hybrid_features_with_timing()
     
     if results is not None:
         print("✓ Extraction completed successfully!")
+        print(f"Total processing time: {results['total_time']:.2f} seconds")
+        print(f"Success rate: {results['success_rate']:.1f}%")
     else:
         print("✗ Extraction failed!")
+# %% save results to csv
+
+results_df = pd.DataFrame([results])
+results_df.to_csv("AKTIVES_hybrid_efficiency.csv", index=False)
 # %%
