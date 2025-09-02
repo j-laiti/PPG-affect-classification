@@ -39,38 +39,38 @@ class FixedDilatedCNN(nn.Module):
         self.conv_blocks = nn.ModuleList([
             # Block 1: dilation=1, capture fine details
             nn.Sequential(
-                nn.Conv1d(1, 64, kernel_size=7, dilation=1, padding='same'),
-                nn.BatchNorm1d(64),
+                nn.Conv1d(1, 32, kernel_size=5, dilation=1, padding='same'),
+                nn.BatchNorm1d(32),
                 nn.ReLU(),
-                nn.Dropout(0.3)
+                nn.Dropout(0.4)
             ),
             # Block 2: dilation=2
             nn.Sequential(
-                nn.Conv1d(64, 128, kernel_size=7, dilation=2, padding='same'),
-                nn.BatchNorm1d(128),
+                nn.Conv1d(32, 64, kernel_size=5, dilation=2, padding='same'),
+                nn.BatchNorm1d(64),
                 nn.ReLU(),
-                nn.Dropout(0.4)
+                nn.Dropout(0.5)
             ),
             # Block 3: dilation=4
             nn.Sequential(
-                nn.Conv1d(128, 256, kernel_size=7, dilation=4, padding='same'),
-                nn.BatchNorm1d(256),
+                nn.Conv1d(64, 128, kernel_size=5, dilation=4, padding='same'),
+                nn.BatchNorm1d(128),
                 nn.ReLU(),
-                nn.Dropout(0.4)
+                nn.Dropout(0.6)
             ),
             # Block 4: dilation=8
             nn.Sequential(
-                nn.Conv1d(256, 256, kernel_size=7, dilation=8, padding='same'),
+                nn.Conv1d(128, 256, kernel_size=5, dilation=8, padding='same'),
                 nn.BatchNorm1d(256),
                 nn.ReLU(),
-                nn.Dropout(0.5)
+                nn.Dropout(0.7)
             ),
             # Block 5: dilation=16 (EXACT same as WESAD)
             nn.Sequential(
                 nn.Conv1d(256, 512, kernel_size=7, dilation=16, padding='same'),
                 nn.BatchNorm1d(512),
                 nn.ReLU(),
-                nn.Dropout(0.5)
+                nn.Dropout(0.7)
             )
         ])
 
@@ -79,7 +79,7 @@ class FixedDilatedCNN(nn.Module):
             nn.Flatten(),
             nn.Linear(512, 128),
             nn.ReLU(),
-            nn.Dropout(0.6),
+            nn.Dropout(0.8),
             nn.Linear(128, num_classes)  # Raw logits for CrossEntropyLoss
         )
 
