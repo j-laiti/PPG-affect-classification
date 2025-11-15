@@ -1,324 +1,319 @@
-# The purpose of this file is to create graphs of the PPG data for WESAD and Wellby through different stages of preprocessing
-# Figure 3 in the manuscript was created using this code.
-# Justin Laiti June 22 2025
+"""
+PPG Signal Visualization Example - WESAD, AKTIVES, and Wellby Datasets
 
-#%% imports
+This script demonstrates the preprocessing pipeline on sample data from three datasets.
+Generates Figure 3 from the manuscript.
+
+Note: The Wellby dataset is not publicly available due to privacy restrictions.
+      Examples using WESAD and AKTIVES datasets are fully reproducible.
+
+Usage:
+    - Run entire script: python visualize_ppg_preprocessing.py
+    - Run interactively: Open in VSCode/Jupyter and execute cells with #%%
+    
+Author: Justin Laiti 
+Note: Code organization and documentation assisted by Claude Sonnet 4.5
+Last updated: Nov 15, 2025
+"""
+
+#%% Imports and Configuration
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 
-from preprocessing.filters import *
-from preprocessing.peak_detection import *
+from preprocessing.filters import (
+    standardize, 
+    bandpass_filter, 
+    moving_average_filter,
+    simple_dynamic_threshold,
+    simple_noise_elimination
+)
+from preprocessing.peak_detection import threshold_peakdetection
 
-# Font settings for figures
-title_fontsize = 20
-label_fontsize = 18
-tick_fontsize = 16
+# Font settings for publication-quality figures
+TITLE_FONTSIZE = 20
+LABEL_FONTSIZE = 18
+TICK_FONTSIZE = 16
 
-#%% Visualize the preprocesing of a segment of data from the WESAD dataset
-
-# WESAD BVP file path. For this example, data is chosen from S2
-file_path = "../data/WESAD/S2/S2_E4_Data/BVP.csv"
-
-# Load dataset
-df = pd.read_csv(file_path)
-bvp_signal = df.iloc[:, 0].values
-
-# Sampling frequency (Hz)
-fs = 64  
-time_seconds = np.arange(len(bvp_signal)) / fs  # Generate time column in seconds
-df["Time (s)"] = time_seconds
-
-# Select time interval of focus (this example highlights PPG data between 40.12 - 41.12 minutes)
-start_time = 40.34 * 60  # Convert to seconds
-end_time = 40.84 * 60
-df_filtered = df[(df["Time (s)"] >= start_time) & (df["Time (s)"] <= end_time)]
-
-# Extract PPG values
-ppg_values = df_filtered.iloc[:, 0].values
-filtered_time_segment = df_filtered["Time (s)"].values
-raw_signal_relative_time = filtered_time_segment - filtered_time_segment[0]
-
-# Remove NaN and standardize
-raw_ppg_values = ppg_values[~np.isnan(ppg_values)]
-ppg_standardized = standardize(raw_ppg_values) 
-time_raw = raw_signal_relative_time[:len(raw_ppg_values)]  # Match time to cleaned signal
-
-print(f"Original signal length: {len(ppg_values)}")
-print(f"After NaN removal: {len(raw_ppg_values)}")
-print(f"Standardized signal stats - Mean: {np.mean(ppg_standardized):.3f}, Std: {np.std(ppg_standardized):.3f}")
-
-#%% Apply filters step by step
-
-# Step 1: Bandpass filter
-bandpass_signal = bandpass_filter(ppg_standardized, lowcut=0.5, highcut=10.0, fs=fs, order=2)
-
-# Step 2: Moving average smoothing
-smoothed_signal = moving_average_filter(bandpass_signal, window_size=5)
-
-# Step 3: Simple dynamic thresholding and noise elimination
-segment_stds, std_ths = simple_dynamic_threshold(smoothed_signal, fs, 85)
-clean_signal, clean_indices = simple_noise_elimination(smoothed_signal, fs, std_ths)
-
-# Step 4: Final smoothing
-final_clean_signal = moving_average_filter(clean_signal, window_size=5)
-
-# Map clean signal to time (basically just create an array as long as the clean signal?)
-clean_time_mapped = np.arange(len(final_clean_signal)) / fs
-
-# Convert processed signal into DataFrame for easier plotting
-processed_df = pd.DataFrame({"Time (s)": clean_time_mapped, "PPG": final_clean_signal})
-
-# run peak detection
-peaks_threshold = threshold_peakdetection(final_clean_signal, fs)
-peak_times = processed_df["Time (s)"].iloc[peaks_threshold].values
-
-#%% Plot Raw vs Final Clean Signal
-
-plt.figure(figsize=(8, 8))
-
-# Top subplot: Raw signal
-plt.subplot(2, 1, 1)
-plt.plot(time_raw, raw_ppg_values, 'b-', linewidth=1, label="Raw PPG Signal")
-plt.xlabel("Time (seconds)", fontsize=label_fontsize, fontfamily='serif')
-plt.ylabel("PPG Amplitude", fontsize=label_fontsize, fontfamily='serif')
-plt.title("Raw PPG Signal", fontsize=title_fontsize, fontfamily='serif')
-plt.grid(True)
-plt.xticks(fontsize=tick_fontsize)
-plt.yticks(fontsize=tick_fontsize)
-# plt.legend()
-
-# Bottom subplot: Final clean signal
-plt.subplot(2, 1, 2)
-plt.plot(processed_df["Time (s)"], processed_df["PPG"], 'g-', linewidth=1, label="Final Clean Signal")
-plt.scatter(peak_times, final_clean_signal[peaks_threshold], color='r', label="Detected Peaks")
-plt.xlabel("Time (seconds)", fontsize=label_fontsize, fontfamily='serif')
-plt.ylabel("PPG Amplitude", fontsize=label_fontsize, fontfamily='serif')
-plt.title("Processed PPG Signal with Peak Detection", fontsize=title_fontsize, fontfamily='serif')
-plt.grid(True)
-plt.xticks(fontsize=tick_fontsize)
-plt.yticks(fontsize=tick_fontsize)
-plt.tight_layout()
-plt.show()
-
-
-#%% comparison of bandpass filter ranges
-
-
-
-
-
-
-
-
-
-
-#%% Visualize the preprocesing of a segment of data from the Wellby dataset
-
-file_path = '../data/Wellby/selected_ppg_data.csv'
-ppg_data = pd.read_csv(file_path)
-
-# Select column for processing
-column_index = 16  # Update this to choose a new column
-ppg_values = ppg_data.iloc[:, column_index].values
-recording_id = ppg_data.columns[column_index]  # Get column name as ID
-
-# Remove NaN values
-raw_ppg_values = ppg_values[~np.isnan(ppg_values)]  
-
-# Define sampling frequency
-fs = 50  
-
-# focus on a 30 sec segment of the data
-start_index = 10 *fs # Start at 10 seconds
-end_index = start_index + 30 * fs  # 30 seconds segment
-ppg_values = raw_ppg_values[start_index:end_index]
-
-# Standardize signal
-ppg_values = standardize(ppg_values)  
-
-# Create **original** time axis based on the entire segment
-time_seconds = np.arange(len(raw_ppg_values)) / fs  
-
-# Ensure **time array matches the processed signal length**
-filtered_time_seconds = time_seconds[start_index:start_index + len(ppg_values)]
-
-#%% Run Filtering & Peak Detection
-
-# Apply filters
-wellby_filtered_signal = bandpass_filter(ppg_values, lowcut=0.7, highcut=5.0, fs=fs, order=2)
-wellby_smoothed_signal = moving_average_filter(wellby_filtered_signal, window_size=5)
-
-# Noise elimination
-segment_stds, std_ths = simple_dynamic_threshold(wellby_smoothed_signal, fs, 85)
-wellby_clean_signal, wellby_clean_indices = simple_noise_elimination(wellby_smoothed_signal, fs, std_ths)
-
-# final smoothing
-wellby_final_clean_signal = moving_average_filter(wellby_clean_signal, window_size=3)
-
-# Ensure **time axis matches cleaned signal**
-processed_time_seconds = np.arange(len(wellby_final_clean_signal)) / fs
-
-# Detect peaks & adjust their locations
-sim_peaks_threshold = threshold_peakdetection(wellby_final_clean_signal, fs)
-peak_times = processed_time_seconds[sim_peaks_threshold]  # Use correct time values
-
-
-# %% Plot Processed PPG with Peak Detection
-
-# Set Times font at the beginning
 plt.rcParams['font.family'] = 'serif'
 plt.rcParams['font.serif'] = ['Times', 'Times New Roman', 'DejaVu Serif']
 plt.rcParams['mathtext.fontset'] = 'stix'
 
-plt.figure(figsize=(8, 8))
 
-# Top subplot: Raw signal
-plt.subplot(2, 1, 1)
-plt.plot(filtered_time_seconds, ppg_values, 'b-', linewidth=1, label="Raw PPG Signal")
-plt.xlabel("Time (seconds)", fontsize=label_fontsize, fontfamily='serif')
-plt.ylabel("PPG Amplitude", fontsize=label_fontsize, fontfamily='serif')
-plt.title("Raw PPG Signal", fontsize=title_fontsize, fontfamily='serif')
-plt.grid(True)
-plt.xticks(fontsize=tick_fontsize)
-plt.yticks(fontsize=tick_fontsize)
-# plt.legend()
+#%% WESAD Dataset Example
+# 
+# Process and visualize PPG data from the WESAD dataset.
+# Using Subject 2 (S2), time interval: 40.34 - 40.84 minutes
+# Load and Prepare WESAD Data
+def load_wesad_segment(file_path, start_min, end_min, fs=64):
+    """
+    Load a time segment from WESAD BVP data.
+    
+    Parameters
+    ----------
+    file_path : str
+        Path to BVP.csv file
+    start_min : float
+        Start time in minutes
+    end_min : float
+        End time in minutes
+    fs : int
+        Sampling frequency in Hz
+        
+    Returns
+    -------
+    ppg_values : ndarray
+        PPG signal values
+    time_array : ndarray
+        Time array in seconds (relative to segment start)
+    """
+    df = pd.read_csv(file_path)
+    bvp_signal = df.iloc[:, 0].values
+    
+    # Create time column
+    time_seconds = np.arange(len(bvp_signal)) / fs
+    df["Time (s)"] = time_seconds
+    
+    # Select time interval
+    start_time = start_min * 60
+    end_time = end_min * 60
+    df_filtered = df[(df["Time (s)"] >= start_time) & (df["Time (s)"] <= end_time)]
+    
+    # Extract and clean
+    ppg_values = df_filtered.iloc[:, 0].values
+    ppg_values = ppg_values[~np.isnan(ppg_values)]
+    
+    # Create relative time array
+    time_array = np.arange(len(ppg_values)) / fs
+    
+    return ppg_values, time_array
 
-# Bottom subplot: Final clean signal
-plt.subplot(2, 1, 2)
-plt.plot(processed_time_seconds, wellby_final_clean_signal, 'g-', linewidth=1, label="Final Clean Signal")
-plt.scatter(peak_times, wellby_final_clean_signal[sim_peaks_threshold], color='r', label="Detected Peaks")
-plt.xlabel("Time (seconds)", fontsize=label_fontsize, fontfamily='serif')
-plt.ylabel("PPG Amplitude", fontsize=label_fontsize, fontfamily='serif')
-plt.title("Processed PPG Signal with Peak Detection", fontsize=title_fontsize, fontfamily='serif')
-plt.grid(True)
-plt.xticks(fontsize=tick_fontsize)
-plt.yticks(fontsize=tick_fontsize)
-plt.tight_layout()
-plt.show()
+
+# Load WESAD segment
+WESAD_FILE = "../data/WESAD/S2/S2_E4_Data/BVP.csv" # TODO: Update path based on your setup
+raw_ppg_wesad, time_wesad = load_wesad_segment(
+    WESAD_FILE, 
+    start_min=40.34, 
+    end_min=40.84,
+    fs=64
+)
+
+print(f"WESAD - Signal length: {len(raw_ppg_wesad)}")
+print(f"WESAD - Time range: {time_wesad[0]:.2f} to {time_wesad[-1]:.2f} seconds")
 
 
+#%% Process WESAD Signal
+def process_ppg_signal(ppg_values, fs, lowcut=0.5, highcut=10.0, 
+                       noise_percentile=85, order=2):
+    """
+    Apply full preprocessing pipeline to PPG signal.
+    
+    Parameters
+    ----------
+    ppg_values : ndarray
+        Raw PPG signal
+    fs : int
+        Sampling frequency
+    lowcut : float
+        Bandpass filter lower cutoff
+    highcut : float
+        Bandpass filter upper cutoff
+    noise_percentile : int
+        Percentile threshold for noise elimination
+    order : int
+        Butterworth filter order
+        
+    Returns
+    -------
+    clean_signal : ndarray
+        Processed PPG signal
+    peaks : ndarray
+        Indices of detected peaks
+    """
+    # Standardize
+    signal = standardize(ppg_values)
+    
+    # Bandpass filter
+    signal = bandpass_filter(signal, lowcut=lowcut, highcut=highcut, 
+                            fs=fs, order=order)
+    
+    # Moving average
+    signal = moving_average_filter(signal, window_size=5)
+    
+    # Noise elimination
+    _, std_threshold = simple_dynamic_threshold(signal, fs, noise_percentile)
+    clean_signal, _ = simple_noise_elimination(signal, fs, std_threshold)
+    
+    # Final smoothing
+    clean_signal = moving_average_filter(clean_signal, window_size=5)
+    
+    # Peak detection
+    peaks = threshold_peakdetection(clean_signal, fs)
+    
+    return clean_signal, peaks
 
 
+# Process WESAD data
+wesad_clean, wesad_peaks = process_ppg_signal(raw_ppg_wesad, fs=64)
+wesad_clean_time = np.arange(len(wesad_clean)) / 64
 
 
+#%% Plot WESAD Results
+def plot_preprocessing_comparison(raw_signal, raw_time, clean_signal, 
+                                 clean_time, peaks, title_prefix=""):
+    """
+    Create side-by-side comparison of raw and processed signals.
+    
+    Parameters
+    ----------
+    raw_signal : ndarray
+        Raw PPG values
+    raw_time : ndarray
+        Time array for raw signal
+    clean_signal : ndarray
+        Processed PPG values
+    clean_time : ndarray
+        Time array for clean signal
+    peaks : ndarray
+        Peak indices in clean signal
+    title_prefix : str
+        Prefix for plot titles (e.g., "WESAD", "Wellby")
+    """
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8))
+    
+    # Raw signal
+    ax1.plot(raw_time, raw_signal, 'b-', linewidth=1)
+    ax1.set_xlabel("Time (seconds)", fontsize=LABEL_FONTSIZE)
+    ax1.set_ylabel("PPG Amplitude", fontsize=LABEL_FONTSIZE)
+    ax1.set_title(f"{title_prefix} Raw PPG Signal", fontsize=TITLE_FONTSIZE)
+    ax1.grid(True)
+    ax1.tick_params(labelsize=TICK_FONTSIZE)
+    
+    # Processed signal
+    ax2.plot(clean_time, clean_signal, 'g-', linewidth=1)
+    ax2.scatter(clean_time[peaks], clean_signal[peaks], color='r', 
+               label="Detected Peaks", zorder=5)
+    ax2.set_xlabel("Time (seconds)", fontsize=LABEL_FONTSIZE)
+    ax2.set_ylabel("PPG Amplitude", fontsize=LABEL_FONTSIZE)
+    ax2.set_title(f"{title_prefix} Processed PPG Signal with Peak Detection", 
+                 fontsize=TITLE_FONTSIZE)
+    ax2.grid(True)
+    ax2.tick_params(labelsize=TICK_FONTSIZE)
+    
+    plt.tight_layout()
+    plt.show()
 
-#%% aktive data
 
-# import analysis window define relevant data
+plot_preprocessing_comparison(
+    raw_ppg_wesad, time_wesad,
+    wesad_clean, wesad_clean_time, wesad_peaks,
+    title_prefix="WESAD"
+)
 
-windows = pd.read_csv("../data/Aktives/analysis_windows/analysis_windows_dyslexia.csv")
-# select first row to start with
-first_row = windows.iloc[10]
+#%% AKTIVES Dataset Example
+# Process PPG data from the AKTIVES dyslexia study using predefined analysis windows.
 
-participant_cell = first_row["Participant"]
+# Load AKTIVES Analysis Window
+AKTIVES_WINDOWS = "../data/Aktives/analysis_windows/analysis_windows_dyslexia.csv" # TODO: Update path based on your setup
+WINDOW_IDX = 10  # Example window
+
+windows = pd.read_csv(AKTIVES_WINDOWS)
+window = windows.iloc[WINDOW_IDX]
+
+# Parse participant info
+participant_cell = window["Participant"]
 participant = participant_cell.split("_")[0]
 game = participant_cell.split("_")[1]
-print(f"Game: {game}, Participant: {participant}")
 
-interval_start = first_row["Interval_Start"]
-interval_end = first_row["Interval_End"]
-label = first_row["Label"]
+interval_start = window["Interval_Start"]
+interval_end = window["Interval_End"]
+label = window["Label"]
 
-fs = 64  # Sampling frequency in Hz
-# %% now lets load the PPG data for this participant and game
+print(f"\nAKTIVES - Participant: {participant}, Game: {game}")
+print(f"Interval: {interval_start:.2f} - {interval_end:.2f}s, Label: {label}")
 
-relevant_ppg_data = pd.read_csv(f"../data/Aktives/PPG/Dyslexia/{participant}/{game}/BVP.csv")
 
-# add a time column (in seconds from zero)
-relevant_ppg_data["Time"] = relevant_ppg_data.index / 64
-time_segment = relevant_ppg_data["Time"].values
-raw_signal_relative_time = time_segment - time_segment[0]
-# %% now plot!
+#%% Load and Extract AKTIVES PPG Segment
+FS_AKTIVES = 64
+aktives_file = f"../data/Aktives/PPG/Dyslexia/{participant}/{game}/BVP.csv"
 
-# Ensure all values are strings, then replace comma with dot, then convert to float
-relevant_ppg_data['values'] = relevant_ppg_data['values'].astype(str).str.replace(',', '.', regex=False).astype(float)
+df_aktives = pd.read_csv(aktives_file)
+df_aktives['Time'] = df_aktives.index / FS_AKTIVES
 
-# Now select the interval and plot
-ppg_interval = relevant_ppg_data[(relevant_ppg_data['Time'] >= interval_start) & (relevant_ppg_data['Time'] <= interval_end)]
-raw_ppg_values = ppg_interval['values'].values
+# Handle comma decimal separator (European format)
+df_aktives['values'] = (df_aktives['values']
+                        .astype(str)
+                        .str.replace(',', '.', regex=False)
+                        .astype(float))
 
-plt.figure(figsize=(12, 6))
-plt.plot(ppg_interval['Time'], ppg_interval['values'], label='BVP Signal')
-plt.title(f'PPG Data for {participant} - {game}\nInterval: {interval_start} to {interval_end} seconds\nLabel: {label}')
-plt.xlabel('Time (seconds)')
-plt.ylabel('BVP Signal')
-plt.legend()
-plt.grid()
-plt.show()
+# Extract interval
+interval_data = df_aktives[
+    (df_aktives['Time'] >= interval_start) & 
+    (df_aktives['Time'] <= interval_end)
+]
+raw_ppg_aktives = interval_data['values'].values
+time_aktives = (interval_data['Time'].values - 
+                interval_data['Time'].values[0])
 
-# %% now lets try processing this segment of data
 
-# Remove NaN and standardize
-# raw_ppg_values = ppg_interval[~np.isnan(ppg_interval)]
-ppg_standardized = standardize(raw_ppg_values) 
-time_raw = raw_signal_relative_time[:len(raw_ppg_values)]
+#%% Process AKTIVES Signal
+aktives_clean, aktives_peaks = process_ppg_signal(
+    raw_ppg_aktives,
+    fs=FS_AKTIVES,
+    noise_percentile=90  # Higher threshold for this dataset
+)
+aktives_clean_time = np.arange(len(aktives_clean)) / FS_AKTIVES
 
-print(f"Original signal length: {len(raw_ppg_values)}")
-# print(f"After NaN removal: {len(ppg_interval)}")
-print(f"Standardized signal stats - Mean: {np.mean(ppg_standardized):.3f}, Std: {np.std(ppg_standardized):.3f}")
-# %%
-# Apply filters step by step
 
-# Step 1: Bandpass filter
-bandpass_signal = bandpass_filter(ppg_standardized, lowcut=0.5, highcut=10.0, fs=fs, order=2)
+#%% Plot AKTIVES Results
+plot_preprocessing_comparison(
+    raw_ppg_aktives, time_aktives,
+    aktives_clean, aktives_clean_time, aktives_peaks,
+    title_prefix="AKTIVES"
+)
 
-# Step 2: Moving average smoothing
-smoothed_signal = moving_average_filter(bandpass_signal, window_size=5)
+#%% Wellby Dataset Example
+#
+# Process and visualize PPG data from the Wellby study.
+# Using a 30-second segment starting at 10 seconds.
 
-# Step 3: Simple dynamic thresholding and noise elimination
-segment_stds, std_ths = simple_dynamic_threshold(smoothed_signal, fs, 90)
-clean_signal, clean_indices = simple_noise_elimination(smoothed_signal, fs, std_ths)
+# Load Wellby Data
+WELLBY_FILE = '../data/Wellby/wellby_ppg_data.csv' # not publicly available
+COLUMN_INDEX = 16  # Example column
+FS_WELLBY = 50
 
-# Step 4: Final smoothing
-final_clean_signal = moving_average_filter(clean_signal, window_size=5)
+ppg_data = pd.read_csv(WELLBY_FILE)
+recording_id = ppg_data.columns[COLUMN_INDEX]
 
-# Map clean signal to time (basically just create an array as long as the clean signal?)
-clean_time_mapped = np.arange(len(final_clean_signal)) / fs
+# Extract and clean
+ppg_values = ppg_data.iloc[:, COLUMN_INDEX].values
+ppg_values = ppg_values[~np.isnan(ppg_values)]
 
-# Convert processed signal into DataFrame for easier plotting
-processed_df = pd.DataFrame({"Time (s)": clean_time_mapped, "PPG": final_clean_signal})
+# Extract 30-second segment (10-40 seconds)
+start_idx = 10 * FS_WELLBY
+end_idx = start_idx + 30 * FS_WELLBY
+raw_ppg_wellby = ppg_values[start_idx:end_idx]
+time_wellby = np.arange(len(raw_ppg_wellby)) / FS_WELLBY
 
-# run peak detection
-peaks_threshold = threshold_peakdetection(final_clean_signal, fs)
-peak_times = processed_df["Time (s)"].iloc[peaks_threshold].values
+print(f"\nWellby - Recording: {recording_id}")
+print(f"Wellby - Signal length: {len(raw_ppg_wellby)}")
 
-#%% Plot Raw vs Final Clean Signal
 
-# Font settings for figures
-title_fontsize = 20
-label_fontsize = 18
-tick_fontsize = 16
+#%% Process Wellby Signal
+wellby_clean, wellby_peaks = process_ppg_signal(
+    raw_ppg_wellby, 
+    fs=FS_WELLBY,
+    lowcut=0.7,
+    highcut=5.0,
+    noise_percentile=85
+)
+wellby_clean_time = np.arange(len(wellby_clean)) / FS_WELLBY
 
-plt.figure(figsize=(8, 8))
 
-# Top subplot: Raw signal
-plt.subplot(2, 1, 1)
-plt.plot(time_raw, raw_ppg_values, 'b-', linewidth=1, label="Raw PPG Signal")
-plt.xlabel("Time (seconds)", fontsize=label_fontsize, fontfamily='serif')
-plt.ylabel("PPG Amplitude", fontsize=label_fontsize, fontfamily='serif')
-plt.title("Raw PPG Signal", fontsize=title_fontsize, fontfamily='serif')
-plt.grid(True)
-plt.xticks(fontsize=tick_fontsize)
-plt.yticks(fontsize=tick_fontsize)
-# plt.legend()
+#%% Plot Wellby Results
+plot_preprocessing_comparison(
+    raw_ppg_wellby, time_wellby,
+    wellby_clean, wellby_clean_time, wellby_peaks,
+    title_prefix="Wellby"
+)
 
-# Bottom subplot: Final clean signal
-plt.subplot(2, 1, 2)
-plt.plot(processed_df["Time (s)"], processed_df["PPG"], 'g-', linewidth=1, label="Final Clean Signal")
-plt.scatter(peak_times, final_clean_signal[peaks_threshold], color='r', label="Detected Peaks")
-plt.xlabel("Time (seconds)", fontsize=label_fontsize, fontfamily='serif')
-plt.ylabel("PPG Amplitude", fontsize=label_fontsize, fontfamily='serif')
-plt.title("Processed PPG Signal with Peak Detection", fontsize=title_fontsize, fontfamily='serif')
-# plt.legend()
-plt.grid(True)
-plt.xticks(fontsize=tick_fontsize)
-plt.yticks(fontsize=tick_fontsize)
-plt.tight_layout()
-plt.show()
-
-# %% using those peaks, extract the time domain HRV data
-#   # this spe
-ppg_features = get_ppg_features(final_clean_signal, fs, label, ppg_standardized, calc_sq=True)
-
-# %%

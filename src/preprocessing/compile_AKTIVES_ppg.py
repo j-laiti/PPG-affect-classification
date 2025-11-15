@@ -1,6 +1,18 @@
-# code to compile all of the AKTIVES PPG windows into one spreadsheet
-# Simple format: each column is one window, with identifier as header and PPG data below
+"""
+AKTIVES PPG Data Compilation Script
 
+Processes the AKTIVES dataset for PPG signal analysis.
+Compiles all PPG windows from different cohorts into a single spreadsheet.
+
+Simple format: each column is one window with identifier as header and PPG data below.
+    
+Author: Justin Laiti
+Note: Code organization and documentation assisted by Claude Sonnet 4.5
+Last updated: Nov 15, 2025
+"""
+
+
+#%% code setup and necessary functions
 # imports
 import numpy as np
 import pandas as pd
@@ -21,7 +33,7 @@ def load_all_aktives_windows():
     all_windows = []
     
     for cohort in cohorts:
-        window_file = f"../../data/Aktives/analysis_windows/analysis_windows_{cohort}.csv"
+        window_file = f"../../data/Aktives/analysis_windows/analysis_windows_{cohort}.csv" # TODO: Update path based on your setup
         
         if os.path.exists(window_file):
             windows_df = pd.read_csv(window_file)
@@ -168,7 +180,7 @@ def compile_aktives_ppg_simple(output_path="aktives_ppg_simple.csv", max_seconds
     
     return compiled_df
 
-# extract relevant AKTIVES data
+#%% extract relevant AKTIVES data
 if __name__ == "__main__":
     # Compile PPG data in simple format (30 seconds max per window)
     df_simple = compile_aktives_ppg_simple("aktives_ppg_simple.csv", max_seconds=30)

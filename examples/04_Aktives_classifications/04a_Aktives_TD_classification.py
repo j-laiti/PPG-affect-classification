@@ -1,9 +1,34 @@
-#%% imports for ML evaluation
+"""
+AKTIVES Dataset Stress Classification Evaluation
+Outlined in Figure 5 and Table VI of the paper
+10.1109/TAFFC.2025.3628467
+
+Evaluates stress detection performance on the AKTIVES dataset using time-domain
+HRV features with multiple random 70/30 train/test splits. Implements grid search
+for hyperparameter tuning and calculates 95% confidence intervals across splits.
+
+The AKTIVES dataset contains PPG data from children during therapeutic gaming
+activities with expert-labeled stress annotations.
+
+Dataset Reference:
+B. Coşkun et al., "A physiological signal database of children with different 
+special needs for stress recognition," Scientific Data, vol. 10, no. 1, p. 382, 2023.
+
+Usage:
+    - Update paths in configuration section below
+    - Run entire script: python aktives_evaluation.py
+    - Run interactively: Open in VSCode/Jupyter and execute cells with #%%
+
+Author: Justin Laiti
+Note: Code organization and documentation assisted by Claude Sonnet 4.5
+Last updated: Nov 15, 2025
+"""
+
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split, cross_val_score
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier, AdaBoostClassifier
-from sklearn import tree, svm
+from sklearn import svm
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.preprocessing import StandardScaler
@@ -12,36 +37,41 @@ from scipy import stats
 import warnings
 warnings.filterwarnings('ignore')
 
-# Load data
-data = pd.read_csv('../../data/Aktives/extracted_features/ppg_features_combined.csv')
+#%%
+# Configuration
+# TODO: Update paths based on local setup
+DATA_PATH = '../../data/Aktives/extracted_features/ppg_features_combined.csv'
+RESULTS_PATH = 'aktives_multiple_splits_with_ci.csv'
 
-print(f"Dataset shape: {data.shape}")
-print(f"Unique participants: {data['participant'].nunique()}")
-print(f"Label distribution:\n{data['label'].value_counts()}")
-print(f"Samples per participant:\n{data['participant'].value_counts().describe()}")
+# Feature selection - exclude pNN50/pNN20 due to short window length in AKTIVES
+FEATURES = ['HR_mean', 'HR_std', 'SDNN', 'SDSD', 'meanNN', 'medianNN', 'RMSSD', 'meanSD', 'sqi']
+LABEL_COLUMN = 'label'
 
-#%% Feature selection
-feats = ['HR_mean','HR_std','SDNN','SDSD','meanNN','medianNN','RMSSD','meanSD','sqi'] # no pnn50/20 used because of data length, optionally include sqi as additional feature
-label = 'label'
+# Cross-validation configuration
+N_SPLITS = 10  # Number of random 70/30 splits for evaluation
+INNER_CV_FOLDS = 3  # Folds for hyperparameter tuning
+TEST_SIZE = 0.3
+RANDOM_STATE = 42
 
-# One hot encode the cohort column to use as contextual data for the model (optional)
-cohort_dummies = pd.get_dummies(data['cohort'], prefix='cohort', drop_first=False)
-
-# Combine original features with cohort dummies
-X = pd.concat([data[feats], cohort_dummies], axis=1).values
-y = data[label].values
-groups = data['participant'].values
-
-print(f"Total features: {X.shape[1]} ({len(feats)} HRV + {len(cohort_dummies.columns)} cohort)")
-
-#%% Normalize features first
-sc = StandardScaler()
-X_scaled = sc.fit_transform(X)
-
-#%% Simple sample-level 70/30 split (like the paper)
-
+#%%
 def calculate_confidence_intervals(values, confidence=0.95):
-    """Calculate confidence intervals for a list of values"""
+    """
+    Calculate confidence intervals using t-distribution.
+    
+    Appropriate for small sample sizes (n=10 splits).
+    
+    Parameters:
+    -----------
+    values : array-like
+        Performance scores across splits
+    confidence : float, default=0.95
+        Confidence level for interval
+        
+    Returns:
+    --------
+    tuple
+        (mean, std, ci_lower, ci_upper)
+    """
     if len(values) < 2:
         return np.mean(values), np.std(values), np.mean(values), np.mean(values)
     
@@ -58,10 +88,36 @@ def calculate_confidence_intervals(values, confidence=0.95):
     
     return mean, std, ci_lower, ci_upper
 
-n_splits = 10
-all_results = {}  # Dictionary to store results for each model across splits
+#%%
+# Load and prepare data
+print("="*70)
+print("AKTIVES DATASET STRESS CLASSIFICATION")
+print("="*70)
 
-# Parameter grids (moved outside loop for efficiency)
+data = pd.read_csv(DATA_PATH)
+
+print(f"\nDataset Overview:")
+print(f"  Shape: {data.shape}")
+print(f"  Unique participants: {data['participant'].nunique()}")
+print(f"  Label distribution:\n{data['label'].value_counts()}")
+print(f"  Samples per participant:\n{data['participant'].value_counts().describe()}")
+
+# One-hot encode cohort as contextual feature
+cohort_dummies = pd.get_dummies(data['cohort'], prefix='cohort', drop_first=False)
+
+X = pd.concat([data[FEATURES], cohort_dummies], axis=1).values
+y = data[LABEL_COLUMN].values
+groups = data['participant'].values
+
+print(f"\nFeature Configuration:")
+print(f"  Total features: {X.shape[1]} ({len(FEATURES)} HRV + {len(cohort_dummies.columns)} cohort)")
+
+# Standardize features
+sc = StandardScaler()
+X_scaled = sc.fit_transform(X)
+
+#%%
+# Define hyperparameter grids for grid search
 param_grids = {
     "Random Forest": {
         'n_estimators': [50, 100],
@@ -102,170 +158,168 @@ param_grids = {
     }
 }
 
-# Define models (moved outside loop)
+# Initialize models
 models = {
-    "Random Forest": RandomForestClassifier(random_state=0, class_weight='balanced'),
-    "AdaBoost": AdaBoostClassifier(random_state=0),
+    "Random Forest": RandomForestClassifier(random_state=RANDOM_STATE, class_weight='balanced'),
+    "AdaBoost": AdaBoostClassifier(random_state=RANDOM_STATE),
     "K-Neighbors": KNeighborsClassifier(),
     "LDA": LinearDiscriminantAnalysis(),
     "SVM": svm.SVC(probability=True, class_weight='balanced'),
-    "Gradient Boosting": GradientBoostingClassifier(random_state=0)
+    "Gradient Boosting": GradientBoostingClassifier(random_state=RANDOM_STATE)
 }
 
-# Initialize storage for all splits
-for model_name in models.keys():
-    all_results[model_name] = {
-        'auc_scores': [],
-        'accuracy_scores': [],
-        'f1_scores': []
-    }
+#%%
+def run_multiple_splits_evaluation():
+    """
+    Run evaluation with multiple random 70/30 splits.
+    
+    For each split:
+    1. Create stratified train/test split
+    2. Tune hyperparameters using inner CV on training set
+    3. Evaluate on held-out test set
+    4. Record AUC-ROC, accuracy, and F1-score
+    
+    Calculates mean ± std and 95% CIs across all splits.
+    
+    Returns:
+    --------
+    pd.DataFrame
+        Results with confidence intervals for each model
+    """
+    
+    all_results = {model_name: {'auc_scores': [], 'accuracy_scores': [], 'f1_scores': []} 
+                   for model_name in models.keys()}
 
-for split_i in range(n_splits):
-    print(f"\n=== Split {split_i+1}/{n_splits} ===")
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_scaled, y, test_size=0.3, random_state=42+split_i, stratify=y
-    )
+    print(f"\n{'='*70}")
+    print(f"RUNNING {N_SPLITS} RANDOM 70/30 SPLITS WITH GRID SEARCH")
+    print(f"{'='*70}\n")
 
-    print(f"Train samples: {len(X_train)}, Test samples: {len(X_test)}")
-
-    # Model evaluation loop
-    for model_name, model in models.items():
-        print(f"Training {model_name}...")
+    for split_i in range(N_SPLITS):
+        print(f"=== Split {split_i+1}/{N_SPLITS} ===")
         
-        try:
-            # Get best parameters using inner CV
-            inner_cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=0)
-            grid_search = GridSearchCV(
-                estimator=model, 
-                param_grid=param_grids[model_name], 
-                cv=inner_cv, 
-                scoring='roc_auc', 
-                n_jobs=1
-            )
-            grid_search.fit(X_train, y_train)
-            best_model = grid_search.best_estimator_
-            
-            # Get test set performance
-            y_pred = best_model.predict(X_test)
-            y_pred_proba = best_model.predict_proba(X_test)[:, 1]
-            
-            test_auc = roc_auc_score(y_test, y_pred_proba)
-            test_acc = accuracy_score(y_test, y_pred)
-            test_f1 = f1_score(y_test, y_pred, average='weighted')
-            
-            # Store results for this split
-            all_results[model_name]['auc_scores'].append(test_auc * 100)
-            all_results[model_name]['accuracy_scores'].append(test_acc * 100)
-            all_results[model_name]['f1_scores'].append(test_f1 * 100)
-            
-            print(f"  {model_name}: AUC={test_auc*100:.2f}, Acc={test_acc*100:.2f}, F1={test_f1*100:.2f}")
-            
-        except Exception as e:
-            print(f"Error with {model_name}: {e}")
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_scaled, y, test_size=TEST_SIZE, 
+            random_state=RANDOM_STATE + split_i, 
+            stratify=y
+        )
 
-# Calculate confidence intervals across all splits
-print(f"\n{'='*70}")
-print("FINAL RESULTS ACROSS ALL SPLITS WITH CONFIDENCE INTERVALS")
-print(f"{'='*70}")
+        print(f"Train samples: {len(X_train)}, Test samples: {len(X_test)}")
 
-final_results = []
-
-for model_name in models.keys():
-    if len(all_results[model_name]['auc_scores']) > 0:
-        # Calculate CIs for each metric
-        auc_mean, auc_std, auc_ci_low, auc_ci_high = calculate_confidence_intervals(all_results[model_name]['auc_scores'])
-        acc_mean, acc_std, acc_ci_low, acc_ci_high = calculate_confidence_intervals(all_results[model_name]['accuracy_scores'])
-        f1_mean, f1_std, f1_ci_low, f1_ci_high = calculate_confidence_intervals(all_results[model_name]['f1_scores'])
+        for model_name, model in models.items():
+            print(f"Training {model_name}...", end=' ')
+            
+            try:
+                inner_cv = StratifiedKFold(n_splits=INNER_CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+                grid_search = GridSearchCV(
+                    estimator=model,
+                    param_grid=param_grids[model_name],
+                    cv=inner_cv,
+                    scoring='roc_auc',
+                    n_jobs=-1
+                )
+                grid_search.fit(X_train, y_train)
+                best_model = grid_search.best_estimator_
+                
+                y_pred = best_model.predict(X_test)
+                y_pred_proba = best_model.predict_proba(X_test)[:, 1]
+                
+                test_auc = roc_auc_score(y_test, y_pred_proba)
+                test_acc = accuracy_score(y_test, y_pred)
+                test_f1 = f1_score(y_test, y_pred, average='weighted')
+                
+                all_results[model_name]['auc_scores'].append(test_auc * 100)
+                all_results[model_name]['accuracy_scores'].append(test_acc * 100)
+                all_results[model_name]['f1_scores'].append(test_f1 * 100)
+                
+                print(f"AUC={test_auc*100:.2f}, Acc={test_acc*100:.2f}, F1={test_f1*100:.2f}")
+                
+            except Exception as e:
+                print(f"ERROR: {e}")
         
-        final_results.append({
-            'Algorithm': model_name,
-            'AUC_Mean': auc_mean,
-            'AUC_Std': auc_std,
-            'AUC_CI_Lower': auc_ci_low,
-            'AUC_CI_Upper': auc_ci_high,
-            'AUC_Formatted': f"{auc_mean:.2f} ± {auc_std:.2f} ({auc_ci_low:.2f}, {auc_ci_high:.2f})",
-            'Accuracy_Mean': acc_mean,
-            'Accuracy_Std': acc_std,
-            'Accuracy_CI_Lower': acc_ci_low,
-            'Accuracy_CI_Upper': acc_ci_high,
-            'Accuracy_Formatted': f"{acc_mean:.2f} ± {acc_std:.2f} ({acc_ci_low:.2f}, {acc_ci_high:.2f})",
-            'F1_Mean': f1_mean,
-            'F1_Std': f1_std,
-            'F1_CI_Lower': f1_ci_low,
-            'F1_CI_Upper': f1_ci_high,
-            'F1_Formatted': f"{f1_mean:.2f} ± {f1_std:.2f} ({f1_ci_low:.2f}, {f1_ci_high:.2f})"
-        })
-        
-        print(f"{model_name}:")
-        print(f"  AUC:      {auc_mean:.2f} ± {auc_std:.2f} ({auc_ci_low:.2f}, {auc_ci_high:.2f})")
-        print(f"  Accuracy: {acc_mean:.2f} ± {acc_std:.2f} ({acc_ci_low:.2f}, {acc_ci_high:.2f})")
-        print(f"  F1 Score: {f1_mean:.2f} ± {f1_std:.2f} ({f1_ci_low:.2f}, {f1_ci_high:.2f})")
         print()
 
-# Save results
-results_df = pd.DataFrame(final_results)
-results_df.to_csv('aktives_multiple_splits_with_ci.csv', index=False)
-print(f"Results saved to 'aktives_multiple_splits_with_ci.csv'")
+    print(f"{'='*70}")
+    print("RESULTS ACROSS ALL SPLITS WITH 95% CONFIDENCE INTERVALS")
+    print(f"{'='*70}\n")
 
-# Find best performing model
-best_auc_idx = results_df['AUC_Mean'].idxmax()
-best_model = results_df.loc[best_auc_idx]
-print(f"Best performing model (by AUC): {best_model['Algorithm']}")
-print(f"AUC: {best_model['AUC_Formatted']}")
+    final_results = []
 
-#%% Display final results (same format as LOGO)
-print(f"\n{'='*70}")
-print("FINAL 70/30 SPLIT RESULTS")
-print(f"{'='*70}")
+    for model_name in models.keys():
+        if len(all_results[model_name]['auc_scores']) > 0:
+            auc_mean, auc_std, auc_ci_low, auc_ci_high = calculate_confidence_intervals(
+                all_results[model_name]['auc_scores'])
+            acc_mean, acc_std, acc_ci_low, acc_ci_high = calculate_confidence_intervals(
+                all_results[model_name]['accuracy_scores'])
+            f1_mean, f1_std, f1_ci_low, f1_ci_high = calculate_confidence_intervals(
+                all_results[model_name]['f1_scores'])
+            
+            final_results.append({
+                'Algorithm': model_name,
+                'AUC_Mean': auc_mean,
+                'AUC_Std': auc_std,
+                'AUC_CI_Lower': auc_ci_low,
+                'AUC_CI_Upper': auc_ci_high,
+                'AUC_Formatted': f"{auc_mean:.2f} ± {auc_std:.2f} ({auc_ci_low:.2f}, {auc_ci_high:.2f})",
+                'Accuracy_Mean': acc_mean,
+                'Accuracy_Std': acc_std,
+                'Accuracy_CI_Lower': acc_ci_low,
+                'Accuracy_CI_Upper': acc_ci_high,
+                'Accuracy_Formatted': f"{acc_mean:.2f} ± {acc_std:.2f} ({acc_ci_low:.2f}, {acc_ci_high:.2f})",
+                'F1_Mean': f1_mean,
+                'F1_Std': f1_std,
+                'F1_CI_Lower': f1_ci_low,
+                'F1_CI_Upper': f1_ci_high,
+                'F1_Formatted': f"{f1_mean:.2f} ± {f1_std:.2f} ({f1_ci_low:.2f}, {f1_ci_high:.2f})"
+            })
+            
+            print(f"{model_name}:")
+            print(f"  AUC:      {auc_mean:.2f} ± {auc_std:.2f} (95% CI: {auc_ci_low:.2f}, {auc_ci_high:.2f})")
+            print(f"  Accuracy: {acc_mean:.2f} ± {acc_std:.2f} (95% CI: {acc_ci_low:.2f}, {acc_ci_high:.2f})")
+            print(f"  F1 Score: {f1_mean:.2f} ± {f1_std:.2f} (95% CI: {f1_ci_low:.2f}, {f1_ci_high:.2f})")
+            print()
 
-# Convert to DataFrame and display TEST SET results (matching paper format)
-results_df = pd.DataFrame(results)
+    results_df = pd.DataFrame(final_results)
+    results_df.to_csv(RESULTS_PATH, index=False)
+    print(f"Results saved to '{RESULTS_PATH}'")
 
-print("TEST SET RESULTS (for direct comparison with paper):")
-print(f"{'Model':<20} {'AUC':<8} {'Accuracy':<10} {'F1 Score':<10}")
-print("-" * 55)
-for _, row in results_df.iterrows():
-    if row['AUC'] != 'ERROR':
-        print(f"{row['Model']:<20} {row['AUC']:<8} {row['Accuracy']:<10} {row['F1 Score']:<10}")
-    else:
-        print(f"{row['Model']:<20} {'ERROR':<8} {'ERROR':<10} {'ERROR':<10}")
-
-#%% Analysis and comparison (like LOGO analysis)
-print(f"\n{'='*60}")
-print("PERFORMANCE ANALYSIS")
-print(f"{'='*60}")
-
-# Find best performing models
-valid_results = results_df[results_df['AUC'] != 'ERROR'].copy()
-if len(valid_results) > 0:
-    # Convert to numeric for analysis
-    valid_results['AUC_numeric'] = valid_results['AUC'].astype(float)
-    valid_results['Accuracy_numeric'] = valid_results['Accuracy'].astype(float)
-    valid_results['F1_numeric'] = valid_results['F1 Score'].astype(float)
+    best_auc_idx = results_df['AUC_Mean'].idxmax()
+    best_model = results_df.loc[best_auc_idx]
+    print(f"\nBest performing model (by AUC): {best_model['Algorithm']}")
+    print(f"AUC: {best_model['AUC_Formatted']}")
     
-    # Sort by AUC
-    valid_results_sorted = valid_results.sort_values('AUC_numeric', ascending=False)
-    
-    print("Models ranked by test set AUC performance:")
-    for i, (_, row) in enumerate(valid_results_sorted.iterrows()):
-        print(f"{i+1}. {row['Model']}: AUC={row['AUC']}, Acc={row['Accuracy']}, F1={row['F1 Score']}")
-    
-    # Best results
-    best_auc_model = valid_results_sorted.iloc[0]
-    best_acc_model = valid_results.loc[valid_results['Accuracy_numeric'].idxmax()]
-    best_f1_model = valid_results.loc[valid_results['F1_numeric'].idxmax()]
-    
-    print(f"\nBest Test Set Results:")
-    print(f"  Best AUC: {best_auc_model['Model']} ({best_auc_model['AUC']})")
-    print(f"  Best Accuracy: {best_acc_model['Model']} ({best_acc_model['Accuracy']})")
-    print(f"  Best F1: {best_f1_model['Model']} ({best_f1_model['F1 Score']})")
+    return results_df
 
-#%% Save results
-results_df.to_csv('aktives_70_30_split_results.csv', index=False)
-print(f"\n✓ Results saved to 'aktives_70_30_split_results.csv'")
+#%%
+def display_summary(results_df):
+    """
+    Display formatted summary of results.
+    
+    Parameters:
+    -----------
+    results_df : pd.DataFrame
+        Results dataframe from run_multiple_splits_evaluation
+    """
+    print(f"\n{'='*70}")
+    print("PERFORMANCE SUMMARY")
+    print(f"{'='*70}\n")
 
-print(f"\n{'='*60}")
-print("EVALUATION COMPLETE!")
-print(f"{'='*60}")
-print("Results should be much better than the previous participant-level split")
-print("You can now use this table for your manuscript comparison")
+    print(f"{'Model':<20} {'AUC-ROC':<35} {'Accuracy':<35}")
+    print("-" * 90)
+    for _, row in results_df.iterrows():
+        print(f"{row['Algorithm']:<20} {row['AUC_Formatted']:<35} {row['Accuracy_Formatted']:<35}")
+
+    print(f"\n{'='*70}")
+    print("MODELS RANKED BY AUC-ROC")
+    print(f"{'='*70}\n")
+    
+    results_sorted = results_df.sort_values('AUC_Mean', ascending=False)
+    for i, (_, row) in enumerate(results_sorted.iterrows()):
+        print(f"{i+1}. {row['Algorithm']}: {row['AUC_Formatted']}")
+
+    print(f"\n{'='*70}")
+    print("EVALUATION COMPLETE")
+    print(f"{'='*70}")
+
+if __name__ == "__main__":
+    results_df = run_multiple_splits_evaluation()
+    display_summary(results_df)

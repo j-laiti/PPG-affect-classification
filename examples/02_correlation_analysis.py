@@ -1,250 +1,37 @@
-# The purpose of this file is to create correlation graphs between HRV features and stress/fatigue labels
-# Figure 4 in the manuscript was created using this code.
-# Justin Laiti June 23 2025
+"""
+HRV Feature Correlation Analysis
 
-### WESAD Correlation Analysis ###
+This script computes point-biserial correlations between time-domain HRV features
+and binary stress/fatigue labels across three datasets (WESAD, AKTIVES, Wellby).
+Generates Figure 4 from the manuscript.
 
-#%% imports
+Note: The Wellby dataset is not publicly available due to privacy restrictions.
+
+Usage:
+    - Run entire script: python correlation_analysis.py
+    - Run interactively: Open in VSCode/Jupyter and execute cells with #%%
+    - this depends on having the WESAD and AKTIVES features already extracted using
+      the pipelines in src/feature_extraction/wesad_processing.py and
+      src/feature_extraction/aktives_process_folder.py respectively.
+    
+Author: Justin Laiti
+Note: Code organization and documentation assisted by Claude Sonnet 4.5
+Last updated: Nov 15, 2025
+"""
+
+#%% Imports and Configuration
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.stats import pointbiserialr
 import numpy as np
 
-#%%
-
-# Load both CSV files
-wesad_features_file_path = "../data/WESAD/data_merged_bp_time.csv"
-
-# Load datasets & add a column indicating the processing pipeline
-df2 = pd.read_csv(wesad_features_file_path)
-
-feats = ['HR_mean','HR_std','meanNN','SDNN','medianNN','meanSD','SDSD','RMSSD','pNN20','pNN50']
-label = ['label']
-
-#%% run correlation analysis for stress labels
-
-# isolate features of interest
-time_domain_features = df2[feats + label]
-
-# arrays to save correlation results
-wesad_correlations = []
-feature_names = []
-
-print("=== WESAD LABEL ANALYSIS ===")
-print("Label value counts:", df2['label'].value_counts())
-print("Feature means by label:")
-for label_val in df2['label'].unique():
-    subset = df2[df2['label'] == label_val]
-    print(f"\nLabel {label_val}:")
-    print(f"  HR_mean: {subset['HR_mean'].mean():.2f}")
-    print(f"  RMSSD: {subset['RMSSD'].mean():.2f}")
-
-print("Point Biserial Correlation Analysis:")
-print("====================================")
-
-for feature in feats:
-    corr, p_value = pointbiserialr(time_domain_features[feature], time_domain_features["label"])
-    wesad_correlations.append(corr)
-    feature_names.append(feature)
-
-    print(f"{feature}: Correlation = {corr:.2f}, p-value = {p_value:.3f}")
-
-#%% Create correlation heatmap
-
-correlation_data = pd.DataFrame({
-    'Stress Correlation': wesad_correlations,
-}, index=feature_names)
-
-# Plot heatmap
-plt.figure(figsize=(4, 8))
-sns.heatmap(correlation_data, 
-            annot=True, 
-            fmt='.2f', 
-            cmap='coolwarm',
-            center=0,       # Center colormap at 0
-            cbar_kws={'label': 'Correlation with Stress'},
-            linewidths=0.5)
-
-plt.title('HRV Features Correlation with Stress Classification\n(WESAD Dataset)', 
-          fontsize=14, fontweight='bold', pad=20)
-plt.ylabel('HRV Features', fontsize=12)
-plt.xlabel('Stress Correlation', fontsize=12)
-plt.xticks(rotation=0)
-plt.yticks(rotation=0)
-plt.tight_layout()
-plt.show()
-
-
-
-
-
-
-# %%
-# ### Wellby Correlation Analysis ###
-
-# Load both CSV files
-wellby_features_file_path = "../data/Wellby/combined_sim_features_adj4.csv"
-
-# Load datasets & add a column indicating the processing pipeline
-df = pd.read_csv(wellby_features_file_path)
-
-feats = ['HR_mean','HR_std','meanNN','SDNN','medianNN','meanSD','SDSD','RMSSD','pNN20','pNN50']
-labels = ['sleep_binary','stress_binary']
-
-df2 = df[feats + labels]
-
-# %% feature correlation with stress
-
-# arrays to save correlation results
-wellby_stress_correlations = []
-wellby_sleep_correlations = []
-feature_names = []
-
-print("Point Biserial Correlation Analysis:")
-print("====================================")
-
-# correlation analysis for stress label
-for feature in feats:
-    stress_corr, p_value = pointbiserialr(df2[feature], df2["stress_binary"])
-    sleep_corr, p_value = pointbiserialr(df2[feature], df2["sleep_binary"])
-    wellby_stress_correlations.append(stress_corr)
-    wellby_sleep_correlations.append(sleep_corr)
-    feature_names.append(feature)
-
-    print(f"{feature}: Correlation = {stress_corr:.2f}, p-value = {p_value:.3f}")
-    print(f"{feature}: Correlation = {sleep_corr:.2f}, p-value = {p_value:.3f}")
-
-#%% Create correlation heatmaps for Wellby dataset
-
-
-wellby_correlation_data = pd.DataFrame({
-    'Stress Correlation': wellby_stress_correlations,
-    'Sleep Correlation': wellby_sleep_correlations
-}, index=feature_names)
-
-# Plot heatmap
-plt.figure(figsize=(8, 10))
-sns.heatmap(wellby_correlation_data, 
-            annot=True, 
-            fmt='.2f', 
-            cmap='coolwarm',
-            center=0,
-            cbar_kws={'label': 'Correlation Coefficient'},
-            linewidths=0.5)
-
-plt.title('HRV Features Correlation Comparison\nWellby Dataset', 
-          fontsize=16, fontweight='bold', pad=20)
-plt.ylabel('HRV Features', fontsize=12)
-plt.xlabel('Dataset & Classification Type', fontsize=12)
-plt.xticks(rotation=45)
-plt.yticks(rotation=0)
-plt.tight_layout()
-plt.show()
-
-
-
-
-# %%
-# ### AKTIVES Correlation Analysis ###
-
-# Load both CSV files
-aktives_features_file_path = "../data/Aktives/extracted_features/ppg_features_combined.csv"
-
-# Load datasets & add a column indicating the processing pipeline
-df = pd.read_csv(aktives_features_file_path)
-
-feats = ['HR_mean','HR_std','meanNN','SDNN','medianNN','meanSD','SDSD','RMSSD','pNN20','pNN50']
-label = ['label']
-
-df2 = df[feats + label]
-
-# %% feature correlation with stress
-
-# arrays to save correlation results
-aktives_correlations = []
-feature_names = []
-
-print("Point Biserial Correlation Analysis:")
-print("====================================")
-
-# correlation analysis for stress label
-for feature in feats:
-    stress_corr, p_value = pointbiserialr(df2[feature], df2["label"])
-    aktives_correlations.append(stress_corr)
-    feature_names.append(feature)
-
-    print(f"{feature}: Correlation = {stress_corr:.2f}, p-value = {p_value:.3f}")
-
-#%% Create correlation heatmaps for Aktives dataset
-aktives_correlation_data = pd.DataFrame({
-    'Stress Correlation': aktives_correlations,
-}, index=feature_names)
-
-# Plot heatmap
-plt.figure(figsize=(8, 10))
-sns.heatmap(aktives_correlation_data, 
-            annot=True, 
-            fmt='.2f', 
-            cmap='coolwarm',
-            center=0,
-            cbar_kws={'label': 'Correlation Coefficient'},
-            linewidths=0.5)
-
-plt.title('HRV Features Correlation Comparison\nWellby Dataset', 
-          fontsize=16, fontweight='bold', pad=20)
-plt.ylabel('HRV Features', fontsize=12)
-plt.xlabel('Dataset & Classification Type', fontsize=12)
-plt.xticks(rotation=45)
-plt.yticks(rotation=0)
-plt.tight_layout()
-plt.show()
-
-
-
-
-
-
-
-
-#%% plot all data together
-
-all_correlation_data = pd.DataFrame({
-    'Wellby Stress': wellby_stress_correlations,
-    'Wellby Sleep': wellby_sleep_correlations,
-    'Aktives Stress': aktives_correlations,
-    'WESAD Stress': wesad_correlations
-}, index=feature_names)
-
-plt.figure(figsize=(8, 10))
-sns.heatmap(all_correlation_data, 
-            annot=True, 
-            fmt='.2f', 
-            cmap='coolwarm',
-            center=0,
-            cbar_kws={'label': 'Correlation Coefficient'},
-            linewidths=0.5)
-
-plt.title('HRV Features Correlation Comparison\nWellby vs WESAD Datasets', 
-          fontsize=16, fontweight='bold', pad=20)
-plt.ylabel('HRV Features', fontsize=12)
-plt.xlabel('Dataset & Classification Type', fontsize=12)
-plt.xticks(rotation=45)
-plt.yticks(rotation=0)
-plt.tight_layout()
-plt.show()
-
-# %%
-
-# Set Times font for manuscript
-plt.rcParams.update({
-    'font.family': 'serif',
-    'font.serif': ['Times', 'Times New Roman'],
-    'mathtext.fontset': 'stix'
-})
-
-# Create mapping for better feature names
-feature_name_mapping = {
+# Time-domain HRV features to analyze
+HRV_FEATURES = ['HR_mean', 'HR_std', 'meanNN', 'SDNN', 'medianNN', 
+                'meanSD', 'SDSD', 'RMSSD', 'pNN20', 'pNN50']
+
+# Feature display names for publication
+FEATURE_LABELS = {
     'HR_mean': 'Mean HR',
     'HR_std': 'Std HR', 
     'meanNN': 'Mean NN',
@@ -257,72 +44,193 @@ feature_name_mapping = {
     'pNN50': 'pNN50'
 }
 
-# Apply mapping to feature names
-renamed_features = [feature_name_mapping.get(name, name) for name in feature_names]
+# Configure matplotlib for publication-quality figures
+plt.rcParams.update({
+    'font.family': 'serif',
+    'font.serif': ['Times', 'Times New Roman'],
+    'mathtext.fontset': 'stix'
+})
 
-all_correlation_data = pd.DataFrame({
-    'Wellby Stress': wellby_stress_correlations,
-    'Wellby Sleep': wellby_sleep_correlations,
-    'AKTIVES Stress': aktives_correlations,
-    'WESAD Stress': wesad_correlations
-}, index=renamed_features)
 
-# Create manuscript-ready figure
-plt.figure(figsize=(9, 8))
-sns.heatmap(all_correlation_data, 
-            annot=True, 
-            fmt='.2f', 
-            cmap='coolwarm',
-            center=0,
-            vmin=-1.0,
-            vmax=1.0,     
-            cbar_kws={'label': 'Correlation Coefficient', 'shrink': 0.9},
-            linewidths=0.5,
-            annot_kws={'fontsize': 14})  # Annotation font size
+#%% Helper Functions
+def compute_correlations(df, features, label_column):
+    """
+    Compute point-biserial correlations between features and binary label.
+    
+    Parameters
+    ----------
+    df : DataFrame
+        Data containing features and labels
+    features : list
+        List of feature column names
+    label_column : str
+        Name of binary label column
+        
+    Returns
+    -------
+    correlations : list
+        Correlation coefficients for each feature
+    p_values : list
+        P-values for each correlation
+    """
+    correlations = []
+    p_values = []
+    
+    print(f"\n=== {label_column.upper()} CORRELATION ANALYSIS ===")
+    print(f"Label distribution: {df[label_column].value_counts().to_dict()}")
+    print("\nCorrelations:")
+    print("-" * 50)
+    
+    for feature in features:
+        corr, p_val = pointbiserialr(df[feature], df[label_column])
+        correlations.append(corr)
+        p_values.append(p_val)
+        
+        sig_marker = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else ""
+        print(f"{feature:12s}: r = {corr:6.3f}, p = {p_val:.4f} {sig_marker}")
+    
+    return correlations, p_values
 
-plt.title('Point-Biserial Correlation Across Datasets', 
-          fontsize=20, fontweight='bold', pad=20, fontfamily='serif')
-plt.ylabel('HRV Features', fontsize=18, fontfamily='serif')
-plt.xlabel('Dataset & Classification Type', fontsize=18, fontfamily='serif')
-plt.xticks(rotation=0, fontsize=16)
-plt.yticks(rotation=0, fontsize=16)
 
-plt.savefig('correlation_heatmap.png', dpi=300, bbox_inches='tight')
+def plot_correlation_heatmap(correlation_df, title, figsize=(8, 10), 
+                             save_path=None):
+    """
+    Create correlation heatmap visualization.
+    
+    Parameters
+    ----------
+    correlation_df : DataFrame
+        DataFrame with features as index and datasets/labels as columns
+    title : str
+        Plot title
+    figsize : tuple
+        Figure dimensions (width, height)
+    save_path : str, optional
+        Path to save figure
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    sns.heatmap(correlation_df, 
+                annot=True, 
+                fmt='.2f', 
+                cmap='coolwarm',
+                center=0,
+                vmin=-1.0,
+                vmax=1.0,
+                cbar_kws={'label': 'Correlation Coefficient'},
+                linewidths=0.5,
+                annot_kws={'fontsize': 14},
+                ax=ax)
+    
+    # Customize colorbar label size
+    cbar = ax.collections[0].colorbar
+    cbar.set_label('Correlation Coefficient', fontsize=18)
+    
+    # Set labels and title
+    ax.set_title(title, fontsize=22, fontweight='bold', pad=20)
+    ax.set_ylabel('HRV Features', fontsize=20)
+    ax.set_xlabel('Dataset & Classification Type', fontsize=20)
+    ax.tick_params(axis='x', labelsize=18, rotation=45)
+    ax.tick_params(axis='y', labelsize=18, rotation=0)
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"\nFigure saved to: {save_path}")
+    
+    plt.show()
 
-# Adjust layout for better spacing
-plt.tight_layout()
 
-# Optional: Save as high-quality figure for manuscript
-# plt.savefig('hrv_correlations_manuscript.pdf', dpi=300, bbox_inches='tight', 
-#             facecolor='white', edgecolor='none')
-# plt.savefig('hrv_correlations_manuscript.png', dpi=300, bbox_inches='tight')
+#%% WESAD Dataset Analysis
+print("\n" + "="*60)
+print("WESAD DATASET")
+print("="*60)
 
-plt.show()
+wesad_df = pd.read_csv("../compiled_features_data/WESAD_features_merged_bp_time.csv") # features extracted using the pipeline in src/feature_extraction/wesad_processing.py 
+wesad_corr, wesad_pvals = compute_correlations(
+    wesad_df, 
+    HRV_FEATURES, 
+    'label'
+)
 
-# now save it and comment on it!!!
-# %%
-plt.figure(figsize=(9, 8))
-ax = sns.heatmap(all_correlation_data, 
-                 annot=True, 
-                 fmt='.2f', 
-                 cmap='coolwarm',
-                 center=0,
-                 vmin=-1.0,
-                 vmax=1.0,     
-                 cbar_kws={'label': 'Correlation Coefficient'},
-                 linewidths=0.5,
-                 annot_kws={'fontsize': 14})
 
-# Manually set the colorbar label font size
-cbar = ax.collections[0].colorbar
-cbar.set_label('Correlation Coefficient', fontsize=18)
+#%% AKTIVES Dataset Analysis
+print("\n" + "="*60)
+print("AKTIVES DATASET")
+print("="*60)
 
-plt.title('Point-Biserial Correlation Across Datasets', 
-          fontsize=22, fontweight='bold', pad=20, fontfamily='serif')
-plt.ylabel('HRV Features', fontsize=20, fontfamily='serif')
-plt.xlabel('Dataset & Classification Type', fontsize=20, fontfamily='serif')
-plt.xticks(rotation=45, fontsize=18)
-plt.yticks(rotation=0, fontsize=18)
+aktives_df = pd.read_csv("../data/Aktives/extracted_features/ppg_features_combined.csv") # features extracted using the pipeline in src/feature_extraction/aktives_process_folder.py  
+aktives_corr, aktives_pvals = compute_correlations(
+    aktives_df,
+    HRV_FEATURES,
+    'label'
+)
 
-plt.savefig('correlation_heatmap.png', dpi=300, bbox_inches='tight')
+
+#%% Wellby Dataset Analysis
+print("\n" + "="*60)
+print("WELLBY DATASET")
+print("="*60)
+
+wellby_df = pd.read_csv("../data/Wellby/Wellby_all_subjects_features.csv")
+
+# Stress correlations
+wellby_stress_corr, wellby_stress_pvals = compute_correlations(
+    wellby_df,
+    HRV_FEATURES,
+    'stress_binary'
+)
+
+# Fatigue correlations
+wellby_fatigue_corr, wellby_fatigue_pvals = compute_correlations(
+    wellby_df,
+    HRV_FEATURES,
+    'sleep_binary'
+)
+
+
+#%% Individual Dataset Heatmaps (Optional)
+# Uncomment to generate individual heatmaps for each dataset
+
+# WESAD only
+# wesad_df_plot = pd.DataFrame({
+#     'Stress': wesad_corr
+# }, index=[FEATURE_LABELS[f] for f in HRV_FEATURES])
+# plot_correlation_heatmap(wesad_df_plot, 'WESAD Dataset Correlations', 
+#                          figsize=(4, 8))
+
+# AKTIVES only
+# aktives_df_plot = pd.DataFrame({
+#     'Stress': aktives_corr
+# }, index=[FEATURE_LABELS[f] for f in HRV_FEATURES])
+# plot_correlation_heatmap(aktives_df_plot, 'AKTIVES Dataset Correlations',
+#                          figsize=(4, 8))
+
+# Wellby only
+# wellby_df_plot = pd.DataFrame({
+#     'Stress': wellby_stress_corr,
+#     'Fatigue': wellby_fatigue_corr
+# }, index=[FEATURE_LABELS[f] for f in HRV_FEATURES])
+# plot_correlation_heatmap(wellby_df_plot, 'Wellby Dataset Correlations',
+#                          figsize=(6, 8))
+
+
+#%% Combined Correlation Heatmap (Figure 4)
+# Combine all correlations into single DataFrame for comparison
+
+combined_correlations = pd.DataFrame({
+    'Wellby Stress': wellby_stress_corr,
+    'Wellby Fatigue': wellby_fatigue_corr,
+    'AKTIVES Stress': aktives_corr,
+    'WESAD Stress': wesad_corr
+}, index=[FEATURE_LABELS[f] for f in HRV_FEATURES])
+
+# Generate publication-ready figure
+plot_correlation_heatmap(
+    combined_correlations,
+    title='Point-Biserial Correlation Across Datasets',
+    figsize=(9, 8),
+    save_path='../results/correlation_heatmap.png'
+)
 # %%
