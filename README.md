@@ -2,6 +2,12 @@
 This repository includes the code to process PPG signals using a lightweight pipeline outlined in the paper:
  J. Laiti, Y. Liu, P. J. Dunne, E. Byrne and T. Zhu, "Real-World Classification of Student Stress and Fatigue Using Wearable PPG Recordings," in IEEE Transactions on Affective Computing, doi: 10.1109/TAFFC.2025.3628467.
 
+ ## Pipeline Overview
+
+![PPG Processing Pipeline](results/ppgPipeline.png)
+
+*Figure: Our lightweight PPG processing pipeline includes noise filtering, noise elimination, peak detection, and feature extraction.*
+
 ## Aim
 The purpose of this project was to prompt further investigation into light-weight processing pipelines for affect detection. Specifically, these pipelines are intended to be efficient enough to run on wearable devices without cloud connectivity. Additionally, we were interested in exploring the potential differences in affect detection in adoelscent cohort data from real-world scenarios. 
 
